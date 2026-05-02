@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import Anser from 'anser';
 
@@ -293,7 +293,7 @@ function TimelineScrubber({
 }: {
   events: LogEvent[];
   onSeek: (eventIndex: number) => void;
-}): JSX.Element | null {
+}): ReactElement | null {
   const buckets = useMemo(() => {
     if (events.length < 2) return null;
     const N_BUCKETS = 80;
