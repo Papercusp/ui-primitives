@@ -43,6 +43,16 @@ export interface LogViewProps {
    * absent, exports use 'log' and permalinks omit the harness segment.
    */
   contextId?: string;
+  /**
+   * Called when the user clicks "Load older". Host fetches from the
+   * paginated history endpoint and prepends the resulting events to
+   * the buffer. `before` is the ts of the oldest event currently in
+   * view; the host should request events older than that.
+   *
+   * Return value indicates whether more history is available beyond
+   * what was just fetched (drives the "Load older" button visibility).
+   */
+  onLoadOlder?: (before: string) => Promise<{ hasMore: boolean }>;
 }
 
 function labelForLevel(level: LogEvent['level']): string {
@@ -407,7 +417,19 @@ async function copyToClipboard(content: string): Promise<void> {
 }
 
 export function LogView(props: LogViewProps) {
-  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId } = props;
+  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId, onLoadOlder } = props;
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const handleLoadOlder = async (): Promise<void> => {
+    if (!onLoadOlder || loadingHistory || events.length === 0) return;
+    setLoadingHistory(true);
+    try {
+      const r = await onLoadOlder(events[0].ts);
+      setHasMoreHistory(r.hasMore);
+    } catch { /* swallow — host shows toast */ }
+    finally { setLoadingHistory(false); }
+  };
   const [internalActive, setInternalActive] = useState<string>('all');
   const activeTabId = activeTabIdProp ?? internalActive;
   const setActiveTabId = (id: string): void => {
@@ -648,6 +670,16 @@ export function LogView(props: LogViewProps) {
                 </button>
               ))}
             </div>
+          ) : null}
+          {onLoadOlder && hasMoreHistory ? (
+            <button
+              type="button"
+              className="h-log-load-older"
+              onClick={() => void handleLoadOlder()}
+              disabled={loadingHistory}
+            >
+              {loadingHistory ? 'Loading older…' : '↑ Load older from history'}
+            </button>
           ) : null}
           <TimelineScrubber
             events={filtered}
