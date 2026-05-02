@@ -172,7 +172,16 @@ function emitAppLink(kind: string, id: string): void {
   );
 }
 
-const LogLine = memo(function LogLine({ index, event }: { index: number; event: LogEvent }) {
+interface LogLineProps {
+  index: number;
+  event: LogEvent;
+  /** When >1, render a "× N" badge that toggles expansion via onToggleCollapse. */
+  runLength?: number;
+  collapsedKey?: string;
+  onToggleCollapse?: (key: string) => void;
+}
+
+const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, onToggleCollapse }: LogLineProps) {
   const segments = useMemo(() => {
     const ansi = Anser.ansiToJson(event.msg, { use_classes: false, remove_empty: true }).map((p) => ({
       content: p.content,
@@ -200,6 +209,14 @@ const LogLine = memo(function LogLine({ index, event }: { index: number; event: 
       {sourceTag}
       <span className={`h-log-tag ${event.level}`}>{labelForLevel(event.level)}</span>
       <span className="h-log-msg">
+        {runLength && runLength > 1 && collapsedKey && onToggleCollapse ? (
+          <button
+            type="button"
+            className="h-log-collapse-badge"
+            onClick={() => onToggleCollapse(collapsedKey)}
+            title={`Click to expand ${runLength} repeated lines`}
+          >× {runLength}</button>
+        ) : null}
         {segments.map((seg, i) => {
           if (seg.href) {
             return (
@@ -280,6 +297,65 @@ export function LogView(props: LogViewProps) {
     [events, activeTab],
   );
 
+  // Collapse runs of consecutive identical messages into one row that
+  // can be expanded. Same source + same level + same msg → a "× N" badge.
+  // Run length is capped at 100; runs longer than that get split so a
+  // pathologically-spammy plugin can't put 5000 dupes in a single row.
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const collapsed: Array<{ event: LogEvent; runLength: number; runStart: number }> = useMemo(() => {
+    const out: Array<{ event: LogEvent; runLength: number; runStart: number }> = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const e = filtered[i];
+      const last = out[out.length - 1];
+      const sameAsLast = last
+        && last.event.source === e.source
+        && last.event.level === e.level
+        && last.event.msg === e.msg
+        && last.runLength < 100;
+      if (sameAsLast) {
+        last.runLength += 1;
+      } else {
+        out.push({ event: e, runLength: 1, runStart: i });
+      }
+    }
+    return out;
+  }, [filtered]);
+
+  // When a row is expanded, it contributes runLength events to the
+  // virtualized list instead of one collapsed row. Build the actual
+  // render list here. Index for the line number is the original event
+  // index in the filtered buffer (so expanding doesn't renumber).
+  const renderRows = useMemo(() => {
+    type Row = { event: LogEvent; index: number; runLength: number; collapsedKey?: string };
+    const rows: Row[] = [];
+    for (const c of collapsed) {
+      const key = `${c.runStart}:${c.event.ts}:${c.event.source}:${c.event.msg}`;
+      if (c.runLength === 1 || expandedKeys.has(key)) {
+        // Expanded — emit each event in the run.
+        for (let i = 0; i < c.runLength; i++) {
+          rows.push({
+            event: filtered[c.runStart + i],
+            index: c.runStart + i,
+            runLength: 1,
+            ...(c.runLength > 1 && i === 0 ? { collapsedKey: key } : {}),
+          });
+        }
+      } else {
+        rows.push({ event: c.event, index: c.runStart, runLength: c.runLength, collapsedKey: key });
+      }
+    }
+    return rows;
+  }, [collapsed, expandedKeys, filtered]);
+
+  const toggleCollapsed = (key: string): void => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const ref = useRef<VirtuosoHandle>(null);
   const atBottomRef = useRef(true);
   const [paused, setPaused] = useState(false);
@@ -295,19 +371,19 @@ export function LogView(props: LogViewProps) {
     } else {
       lastSeenLengthRef.current = filtered.length;
       setUnseenCount(0);
-      if (atBottomRef.current && ref.current && filtered.length > 0) {
-        ref.current.scrollToIndex({ index: filtered.length - 1, behavior: 'auto' });
+      if (atBottomRef.current && ref.current && renderRows.length > 0) {
+        ref.current.scrollToIndex({ index: renderRows.length - 1, behavior: 'auto' });
       }
     }
-  }, [filtered.length, paused]);
+  }, [filtered.length, paused, renderRows.length]);
 
   const onResume = (): void => {
     setPaused(false);
     lastSeenLengthRef.current = filtered.length;
     setUnseenCount(0);
     requestAnimationFrame(() => {
-      if (ref.current && filtered.length > 0) {
-        ref.current.scrollToIndex({ index: filtered.length - 1, behavior: 'auto' });
+      if (ref.current && renderRows.length > 0) {
+        ref.current.scrollToIndex({ index: renderRows.length - 1, behavior: 'auto' });
       }
     });
   };
@@ -351,12 +427,20 @@ export function LogView(props: LogViewProps) {
         <div className="h-log-body">
           <Virtuoso
             ref={ref}
-            data={filtered}
+            data={renderRows}
             className="h-log"
             style={{ height: '100%' }}
             atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; }}
             followOutput={paused ? false : 'smooth'}
-            itemContent={(i, e) => <LogLine index={i} event={e} />}
+            itemContent={(_, row) => (
+              <LogLine
+                index={row.index}
+                event={row.event}
+                runLength={row.runLength}
+                {...(row.collapsedKey ? { collapsedKey: row.collapsedKey } : {})}
+                onToggleCollapse={toggleCollapsed}
+              />
+            )}
           />
           {paused && unseenCount > 0 && (
             <button
