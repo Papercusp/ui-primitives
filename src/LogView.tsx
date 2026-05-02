@@ -185,9 +185,12 @@ interface LogLineProps {
   runLength?: number;
   collapsedKey?: string;
   onToggleCollapse?: (key: string) => void;
+  /** Whether this line is pinned (bookmarked). */
+  bookmarked?: boolean;
+  onToggleBookmark?: (event: LogEvent) => void;
 }
 
-const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, onToggleCollapse }: LogLineProps) {
+const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, onToggleCollapse, bookmarked, onToggleBookmark }: LogLineProps) {
   const segments = useMemo(() => {
     const ansi = Anser.ansiToJson(event.msg, { use_classes: false, remove_empty: true }).map((p) => ({
       content: p.content,
@@ -209,7 +212,14 @@ const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, o
   );
 
   return (
-    <div className={`h-log-line ${event.level} ${classNameForLevel(event.level)}`}>
+    <div className={`h-log-line ${event.level} ${classNameForLevel(event.level)}${bookmarked ? ' bookmarked' : ''}`}>
+      <button
+        type="button"
+        className={`h-log-pin${bookmarked ? ' active' : ''}`}
+        onClick={(ev) => { ev.stopPropagation(); onToggleBookmark?.(event); }}
+        title={bookmarked ? 'Unpin bookmark' : 'Pin as bookmark'}
+        tabIndex={-1}
+      >{bookmarked ? '★' : '☆'}</button>
       <span className="h-log-no" aria-hidden="true">{String(index + 1).padStart(4, '0')}</span>
       <span className="h-log-ts">{formatTs(event.ts)}</span>
       {sourceTag}
@@ -258,6 +268,74 @@ const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, o
     </div>
   );
 });
+
+/**
+ * Density-scrubber rendered above the virtualized list. Buckets the
+ * filtered buffer into N columns by time, shades each column by event
+ * count, and overlays errors as red ticks. Click a bucket to jump.
+ *
+ * Intentionally cheap: O(n) over events, no DOM per event — the bars
+ * are <div>s with width % so a 5000-event buffer is still 60-80 bars.
+ */
+function TimelineScrubber({
+  events,
+  onSeek,
+}: {
+  events: LogEvent[];
+  onSeek: (eventIndex: number) => void;
+}): JSX.Element | null {
+  const buckets = useMemo(() => {
+    if (events.length < 2) return null;
+    const N_BUCKETS = 80;
+    const tStart = Date.parse(events[0].ts);
+    const tEnd = Date.parse(events[events.length - 1].ts);
+    if (!Number.isFinite(tStart) || !Number.isFinite(tEnd) || tEnd <= tStart) return null;
+    const span = tEnd - tStart;
+    const bucketSize = Math.max(1, Math.ceil(span / N_BUCKETS));
+    const out: Array<{ count: number; errors: number; firstIndex: number }> = [];
+    let cursor = 0;
+    for (let i = 0; i < N_BUCKETS; i++) {
+      const bucketEnd = tStart + (i + 1) * bucketSize;
+      let count = 0;
+      let errors = 0;
+      let firstIndex = cursor;
+      while (cursor < events.length) {
+        const ts = Date.parse(events[cursor].ts);
+        if (ts > bucketEnd && i < N_BUCKETS - 1) break;
+        if (count === 0) firstIndex = cursor;
+        count += 1;
+        if (events[cursor].level === 'error') errors += 1;
+        cursor += 1;
+      }
+      out.push({ count, errors, firstIndex });
+    }
+    return out;
+  }, [events]);
+
+  if (!buckets || buckets.length === 0) return null;
+  const maxCount = Math.max(1, ...buckets.map((b) => b.count));
+
+  return (
+    <div className="h-log-scrubber" role="presentation" aria-label="Log timeline">
+      {buckets.map((b, i) => {
+        const heightPct = b.count === 0 ? 0 : Math.max(8, (b.count / maxCount) * 100);
+        const isErrorBucket = b.errors > 0;
+        return (
+          <button
+            key={i}
+            type="button"
+            className={`h-log-scrubber-bar${isErrorBucket ? ' has-errors' : ''}`}
+            style={{ height: `${heightPct}%` }}
+            onClick={() => onSeek(b.firstIndex)}
+            title={`${b.count} events${b.errors ? ` (${b.errors} errors)` : ''} — click to jump`}
+            tabIndex={-1}
+            disabled={b.count === 0}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 /** Build the auto-derived tab strip from the events buffer. */
 function deriveTabs(events: LogEvent[]): LogTab[] {
@@ -403,6 +481,49 @@ export function LogView(props: LogViewProps) {
     });
   };
 
+  // Pinned bookmarks: per-harness, persisted in localStorage. Bookmark key
+  // is `${ts}:${source}:${level}:${msg.slice(0, 80)}` — readable + stable
+  // across stream reconnects (events keep their ts when re-replayed).
+  // Renders as a strip of pin chips above the log; click to jump.
+  const bookmarkStorageKey = contextId ? `papercusp:logBookmarks:${contextId}` : null;
+  const [bookmarks, setBookmarks] = useState<string[]>([]);
+  useEffect(() => {
+    if (!bookmarkStorageKey || typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(bookmarkStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) setBookmarks(parsed.filter((x): x is string => typeof x === 'string'));
+      }
+    } catch { /* ignore corrupt storage */ }
+  }, [bookmarkStorageKey]);
+  const persistBookmarks = (next: string[]): void => {
+    setBookmarks(next);
+    if (bookmarkStorageKey && typeof window !== 'undefined') {
+      try { window.localStorage.setItem(bookmarkStorageKey, JSON.stringify(next.slice(-50))); } catch { /* quota */ }
+    }
+  };
+  const bookmarkKeyFor = (e: LogEvent): string =>
+    `${e.ts}|${e.source}|${e.level}|${e.msg.slice(0, 80)}`;
+  const toggleBookmark = (e: LogEvent): void => {
+    const key = bookmarkKeyFor(e);
+    if (bookmarks.includes(key)) {
+      persistBookmarks(bookmarks.filter((k) => k !== key));
+    } else {
+      persistBookmarks([...bookmarks, key]);
+    }
+  };
+  const bookmarkedEvents = useMemo(() => {
+    if (bookmarks.length === 0) return [] as Array<{ key: string; event: LogEvent; index: number }>;
+    const set = new Set(bookmarks);
+    const out: Array<{ key: string; event: LogEvent; index: number }> = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const k = bookmarkKeyFor(filtered[i]);
+      if (set.has(k)) out.push({ key: k, event: filtered[i], index: i });
+    }
+    return out;
+  }, [bookmarks, filtered]);
+
   const ref = useRef<VirtuosoHandle>(null);
   const atBottomRef = useRef(true);
   const [paused, setPaused] = useState(false);
@@ -508,6 +629,33 @@ export function LogView(props: LogViewProps) {
         </div>
       ) : (
         <div className="h-log-body">
+          {bookmarkedEvents.length > 0 ? (
+            <div className="h-log-bookmarks" aria-label="Pinned bookmarks">
+              <span className="h-log-bookmarks-label">Pinned:</span>
+              {bookmarkedEvents.map((b) => (
+                <button
+                  key={b.key}
+                  type="button"
+                  className="h-log-bookmark-chip"
+                  onClick={() => {
+                    setPaused(true);
+                    ref.current?.scrollToIndex({ index: b.index, align: 'center', behavior: 'smooth' });
+                  }}
+                  title={b.event.msg}
+                >
+                  <span className="h-log-bookmark-ts">{formatTs(b.event.ts).slice(6)}</span>
+                  <span className="h-log-bookmark-msg">{b.event.msg.slice(0, 60)}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <TimelineScrubber
+            events={filtered}
+            onSeek={(eventIndex) => {
+              setPaused(true);
+              ref.current?.scrollToIndex({ index: eventIndex, align: 'center', behavior: 'smooth' });
+            }}
+          />
           <Virtuoso
             ref={ref}
             data={renderRows}
@@ -515,15 +663,20 @@ export function LogView(props: LogViewProps) {
             style={{ height: '100%' }}
             atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; }}
             followOutput={paused ? false : 'smooth'}
-            itemContent={(_, row) => (
-              <LogLine
-                index={row.index}
-                event={row.event}
-                runLength={row.runLength}
-                {...(row.collapsedKey ? { collapsedKey: row.collapsedKey } : {})}
-                onToggleCollapse={toggleCollapsed}
-              />
-            )}
+            itemContent={(_, row) => {
+              const isBookmarked = bookmarks.includes(bookmarkKeyFor(row.event));
+              return (
+                <LogLine
+                  index={row.index}
+                  event={row.event}
+                  runLength={row.runLength}
+                  {...(row.collapsedKey ? { collapsedKey: row.collapsedKey } : {})}
+                  onToggleCollapse={toggleCollapsed}
+                  bookmarked={isBookmarked}
+                  onToggleBookmark={toggleBookmark}
+                />
+              );
+            }}
           />
           {paused && unseenCount > 0 && (
             <button
