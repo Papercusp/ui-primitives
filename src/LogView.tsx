@@ -70,21 +70,122 @@ function shortPluginName(source: string): string {
   return idx >= 0 ? slug.slice(idx + 1) : slug;
 }
 
-const LogLine = memo(function LogLine({ index, event }: { index: number; event: LogEvent }) {
-  const parts = useMemo(
-    () =>
-      Anser.ansiToJson(event.msg, { use_classes: false, remove_empty: true }).map((p) => ({
-        content: p.content,
-        style: {
-          color: p.fg ? `rgb(${p.fg})` : undefined,
-          background: p.bg ? `rgb(${p.bg})` : undefined,
-          fontWeight: p.decoration === 'bold' ? 600 : undefined,
-          fontStyle: p.decoration === 'italic' ? 'italic' : undefined,
-          textDecoration: p.decoration === 'underline' ? 'underline' : undefined,
-        },
-      })),
-    [event.msg],
+/**
+ * Patterns the linkifier recognizes inside log message content. Order
+ * matters — first match wins per chunk so we don't double-wrap (e.g.
+ * a URL that contains an absolute file path inside its query string).
+ */
+const URL_RE = /https?:\/\/[^\s<>"']+/g;
+// Absolute file paths: /a/b/c or C:\a\b\c — followed by an optional :line:col
+const PATH_RE = /\b([\/A-Z]:?[\w./\\-]+\.\w+)(?::(\d+)(?::(\d+))?)?\b/g;
+// Harness feature/issue ids the operator surfaces (feature_xxx, issue_xxx, snap_xxx)
+const ID_RE = /\b((?:feature|issue|snap|inv)[_-][a-z0-9_-]+)\b/g;
+
+interface Segment {
+  content: string;
+  style?: React.CSSProperties;
+  href?: string;
+  /** When set, click target is local — UI handler dispatches a CustomEvent. */
+  appLink?: { kind: 'feature' | 'issue' | 'snapshot' | 'invocation'; id: string };
+}
+
+/**
+ * Take Anser-tokenized parts (color/style chunks) and run each chunk's text
+ * through the linkifier patterns, producing finer-grained Segment[]. Style
+ * is preserved across the splits so a colored URL stays colored.
+ */
+function linkifyParts(
+  parts: Array<{ content: string; style: React.CSSProperties }>,
+): Segment[] {
+  const out: Segment[] = [];
+  for (const part of parts) {
+    if (!part.content) continue;
+    const text = part.content;
+    // Walk through the text, prioritizing URL matches, then paths, then ids.
+    // Combined regex with alternation would be tidier but obscures the
+    // priority logic — keep separate passes.
+    const matches: Array<{ start: number; end: number; seg: Segment }> = [];
+    for (const m of text.matchAll(URL_RE)) {
+      const start = m.index ?? 0;
+      matches.push({
+        start,
+        end: start + m[0].length,
+        seg: { content: m[0], style: part.style, href: m[0] },
+      });
+    }
+    // Skip path/id matches that overlap a URL.
+    const overlaps = (s: number, e: number): boolean =>
+      matches.some((mm) => !(e <= mm.start || s >= mm.end));
+    for (const m of text.matchAll(PATH_RE)) {
+      const start = m.index ?? 0;
+      const end = start + m[0].length;
+      if (overlaps(start, end)) continue;
+      // Treat as a path only if the file extension looks plausible AND the
+      // string contains a path separator. Otherwise it's a normal word.
+      if (!/[\/\\]/.test(m[0])) continue;
+      // Open-in-editor URL — code-server / vscode protocol.
+      const href = `vscode://file${m[0]}`;
+      matches.push({ start, end, seg: { content: m[0], style: part.style, href } });
+    }
+    for (const m of text.matchAll(ID_RE)) {
+      const start = m.index ?? 0;
+      const end = start + m[0].length;
+      if (overlaps(start, end)) continue;
+      const id = m[0];
+      const kind = id.startsWith('feature') ? 'feature'
+        : id.startsWith('issue') ? 'issue'
+        : id.startsWith('snap') ? 'snapshot'
+        : 'invocation';
+      matches.push({
+        start, end,
+        seg: { content: id, style: part.style, appLink: { kind, id } },
+      });
+    }
+    matches.sort((a, b) => a.start - b.start);
+
+    // Stitch unmatched plain-text gaps in between.
+    let cursor = 0;
+    for (const m of matches) {
+      if (m.start < cursor) continue; // overlapping — keep first
+      if (m.start > cursor) {
+        out.push({ content: text.slice(cursor, m.start), style: part.style });
+      }
+      out.push(m.seg);
+      cursor = m.end;
+    }
+    if (cursor < text.length) {
+      out.push({ content: text.slice(cursor), style: part.style });
+    }
+  }
+  return out;
+}
+
+/**
+ * Click handler for in-app id links. Dispatches a CustomEvent the harness
+ * dashboard (or whatever shell is hosting LogView) can listen to and
+ * route to its panel selectors.
+ */
+function emitAppLink(kind: string, id: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('papercusp-log-link', { detail: { kind, id } }),
   );
+}
+
+const LogLine = memo(function LogLine({ index, event }: { index: number; event: LogEvent }) {
+  const segments = useMemo(() => {
+    const ansi = Anser.ansiToJson(event.msg, { use_classes: false, remove_empty: true }).map((p) => ({
+      content: p.content,
+      style: {
+        color: p.fg ? `rgb(${p.fg})` : undefined,
+        background: p.bg ? `rgb(${p.bg})` : undefined,
+        fontWeight: p.decoration === 'bold' ? 600 : undefined,
+        fontStyle: p.decoration === 'italic' ? 'italic' : undefined,
+        textDecoration: p.decoration === 'underline' ? 'underline' : undefined,
+      } as React.CSSProperties,
+    }));
+    return linkifyParts(ansi);
+  }, [event.msg]);
 
   const sourceTag = event.source === 'harness' ? null : (
     <span className="h-log-source" title={event.source}>
@@ -99,9 +200,37 @@ const LogLine = memo(function LogLine({ index, event }: { index: number; event: 
       {sourceTag}
       <span className={`h-log-tag ${event.level}`}>{labelForLevel(event.level)}</span>
       <span className="h-log-msg">
-        {parts.map((p, i) => (
-          <span key={i} style={p.style}>{p.content}</span>
-        ))}
+        {segments.map((seg, i) => {
+          if (seg.href) {
+            return (
+              <a
+                key={i}
+                href={seg.href}
+                target={seg.href.startsWith('http') ? '_blank' : undefined}
+                rel={seg.href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                style={seg.style}
+                className="h-log-link"
+              >
+                {seg.content}
+              </a>
+            );
+          }
+          if (seg.appLink) {
+            const a = seg.appLink;
+            return (
+              <button
+                key={i}
+                type="button"
+                style={seg.style}
+                className={`h-log-link h-log-link-app h-log-link-${a.kind}`}
+                onClick={(ev) => { ev.preventDefault(); emitAppLink(a.kind, a.id); }}
+              >
+                {seg.content}
+              </button>
+            );
+          }
+          return <span key={i} style={seg.style}>{seg.content}</span>;
+        })}
       </span>
     </div>
   );
