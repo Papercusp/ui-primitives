@@ -18,5 +18,12 @@
     "react-markdown": "*",
     "react-virtuoso": "*",
     "remark-gfm": "*"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@papercusp/test-config": "*",
+    "vitest": "^4.1.4"
   }
 }

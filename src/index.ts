@@ -4,7 +4,7 @@
 // Intended for cross-app reuse via git submodule.
 
 export { JsonTree } from './JsonTree';
-export { LogView } from './LogView';
+export { LogView, type LogEvent, type LogTab, type LogViewProps } from './LogView';
 export { MarkdownView } from './MarkdownView';
 export { Panel } from './Panel';
 export { StatCard } from './StatCard';
