@@ -37,6 +37,12 @@ export interface LogViewProps {
   /** Currently active tab id. Defaults to 'all'. */
   activeTabId?: string;
   onTabChange?: (id: string) => void;
+  /**
+   * Stable identifier for this view (e.g. harness slug). Used as a key in
+   * permalink anchors and as a filename root for exports. Optional — when
+   * absent, exports use 'log' and permalinks omit the harness segment.
+   */
+  contextId?: string;
 }
 
 function labelForLevel(level: LogEvent['level']): string {
@@ -281,8 +287,49 @@ function deriveTabs(events: LogEvent[]): LogTab[] {
   return tabs;
 }
 
+/** Render a single LogEvent back to a tail-friendly text line for export. */
+function eventToText(e: LogEvent): string {
+  const sourceTag = e.source === 'harness' ? '' : `[${e.source}] `;
+  return `[${e.ts}] ${sourceTag}${e.level.toUpperCase()}: ${e.msg}`;
+}
+
+/** Trigger a download of the given content as a file with the given name. */
+function downloadAs(filename: string, mime: string, content: string): void {
+  if (typeof window === 'undefined') return;
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+/** Copy content to the clipboard, falling back to a synthetic textarea on older browsers. */
+async function copyToClipboard(content: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(content);
+      return;
+    } catch { /* fall through */ }
+  }
+  if (typeof document !== 'undefined') {
+    const ta = document.createElement('textarea');
+    ta.value = content;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+  }
+}
+
 export function LogView(props: LogViewProps) {
-  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange } = props;
+  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId } = props;
   const [internalActive, setInternalActive] = useState<string>('all');
   const activeTabId = activeTabIdProp ?? internalActive;
   const setActiveTabId = (id: string): void => {
@@ -409,14 +456,50 @@ export function LogView(props: LogViewProps) {
           );
         })}
         <div className="h-log-tabs-spacer" />
-        <button
-          type="button"
-          className={`h-log-pause-toggle${paused ? ' paused' : ''}`}
-          onClick={() => (paused ? onResume() : setPaused(true))}
-          title={paused ? 'Resume auto-scroll' : 'Pause auto-scroll'}
-        >
-          {paused ? '▶ Resume' : '⏸ Pause'}
-        </button>
+        <div className="h-log-toolbar">
+          <button
+            type="button"
+            className="h-log-toolbar-btn"
+            onClick={() => {
+              const text = filtered.map(eventToText).join('\n') + '\n';
+              const name = `${contextId ?? 'log'}-${activeTab?.id ?? 'all'}.log`;
+              downloadAs(name, 'text/plain', text);
+            }}
+            title="Download visible lines as text"
+          >⬇ .log</button>
+          <button
+            type="button"
+            className="h-log-toolbar-btn"
+            onClick={() => {
+              const lines = filtered.map((e) => JSON.stringify(e)).join('\n') + '\n';
+              const name = `${contextId ?? 'log'}-${activeTab?.id ?? 'all'}.jsonl`;
+              downloadAs(name, 'application/x-ndjson', lines);
+            }}
+            title="Download visible events as JSONL (preserves attrs/corrId)"
+          >⬇ .jsonl</button>
+          <button
+            type="button"
+            className="h-log-toolbar-btn"
+            onClick={() => {
+              if (typeof window === 'undefined') return;
+              // Build a permalink that selects this tab + scrolls to the
+              // top of the visible buffer's first event timestamp on load.
+              const url = new URL(window.location.href);
+              if (activeTab) url.searchParams.set('logTab', activeTab.id);
+              if (filtered.length > 0) url.searchParams.set('logAt', filtered[0].ts);
+              void copyToClipboard(url.toString());
+            }}
+            title="Copy a URL that opens this tab + scroll position"
+          >🔗 Link</button>
+          <button
+            type="button"
+            className={`h-log-pause-toggle${paused ? ' paused' : ''}`}
+            onClick={() => (paused ? onResume() : setPaused(true))}
+            title={paused ? 'Resume auto-scroll' : 'Pause auto-scroll'}
+          >
+            {paused ? '▶ Resume' : '⏸ Pause'}
+          </button>
+        </div>
       </div>
       {filtered.length === 0 ? (
         <div className="h-empty">
