@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, Minimize2 } from 'lucide-react';
 
@@ -21,29 +21,84 @@ interface PanelProps {
   maximizable?: boolean;
 }
 
+const PANEL_OVERLAY_ANIM_MS = 220;
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
+
 export function Panel({
   title, count, actions, children, padded, className = '', maximizable = true,
 }: PanelProps) {
   const [maximized, setMaximized] = useState(false);
-  const reactId = useId();
-  // Sanitize for view-transition-name (must be a CSS ident).
-  const vtName = `pc-panel-${reactId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [entered, setEntered] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
 
-  // Wrap state changes in startViewTransition for a smooth shared-element
-  // morph between the in-grid position and the fullscreen overlay. Falls
-  // back to a plain setState on browsers without View Transitions API.
+  const openPanel = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+
+    const reducedMotion = prefersReducedMotion();
+    setClosing(false);
+    setEntered(reducedMotion);
+    setMaximized(true);
+  }, []);
+
+  const closePanel = useCallback(() => {
+    if (!maximized || closing) return;
+
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+
+    if (prefersReducedMotion()) {
+      setClosing(false);
+      setEntered(false);
+      setMaximized(false);
+      return;
+    }
+
+    setClosing(true);
+    setEntered(false);
+    closeTimerRef.current = window.setTimeout(() => {
+      setClosing(false);
+      setMaximized(false);
+      closeTimerRef.current = null;
+    }, PANEL_OVERLAY_ANIM_MS);
+  }, [closing, maximized]);
+
   const toggle = useCallback(() => {
-    const next = !maximized;
-    try {
-      const sv = (document as any).startViewTransition?.bind(document);
-      if (sv) {
-        sv(() => { setMaximized(next); });
-        return;
-      }
-    } catch { /* fall through to direct setState */ }
-    setMaximized(next);
+    if (maximized) {
+      closePanel();
+      return;
+    }
+
+    openPanel();
+  }, [closePanel, maximized, openPanel]);
+
+  useEffect(() => {
+    if (!maximized || prefersReducedMotion()) return;
+
+    setEntered(false);
+    const rafId = window.requestAnimationFrame(() => {
+      setEntered(true);
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
   }, [maximized]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
 
   // ESC closes when maximized.
   useEffect(() => {
@@ -51,12 +106,12 @@ export function Panel({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        toggle();
+        closePanel();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [maximized, toggle]);
+  }, [closePanel, maximized]);
 
   // Lock body scroll while maximized so the underlying page doesn't scroll
   // behind the overlay.
@@ -91,28 +146,23 @@ export function Panel({
       className="h-panel-maximize"
       onClick={toggle}
       aria-label={maximized ? `Restore ${title}` : `Maximize ${title}`}
-      title={maximized ? `Restore (Esc)` : `Maximize`}
+      title={maximized ? `Restore (Esc)` : 'Maximize'}
     >
       {maximized ? <Minimize2 size={13} aria-hidden="true" /> : <Maximize2 size={13} aria-hidden="true" />}
     </button>
   ) : null;
 
-  // The single-element morph approach: render the panel in its normal
-  // place when not maximized, OR portal it to body when maximized. The
-  // view-transition-name + startViewTransition does the rest.
-  const panelStyle: React.CSSProperties = { viewTransitionName: vtName };
-
   if (maximized && typeof document !== 'undefined') {
+    const panelStateClass = closing ? ' is-closing' : entered ? ' is-entered' : '';
+
     return (
       <>
-        {/* Placeholder keeps the grid slot from collapsing. Same outer
-            classes so layout columns stay stable. */}
+        {/* Placeholder keeps the grid slot from collapsing while the real panel
+            is portaled to document.body. */}
         <div className={`h-panel h-panel-placeholder ${className}`} aria-hidden="true" />
         {createPortal(
           <div
-            ref={panelRef}
-            className={`h-panel h-panel-maximized ${className}`}
-            style={panelStyle}
+            className={`h-panel h-panel-maximized${panelStateClass} ${className}`}
             role="dialog"
             aria-modal="true"
             aria-label={`${title} (maximized)`}
@@ -128,7 +178,7 @@ export function Panel({
   }
 
   return (
-    <div ref={panelRef} className={`h-panel ${className}`} style={panelStyle}>
+    <div className={`h-panel ${className}`}>
       {head}
       {body}
       {maximizeBtn}
