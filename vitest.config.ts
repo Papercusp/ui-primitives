@@ -1,3 +1,6 @@
 import { defineVitestConfig } from '@papercusp/test-config';
 
-export default defineVitestConfig({ layer: 'unit' });
+const cfg = defineVitestConfig({ layer: 'unit' });
+cfg.test = { ...(cfg.test ?? {}), environment: 'jsdom' };
+cfg.esbuild = { ...(cfg.esbuild ?? {}), jsx: 'automatic' };
+export default cfg;
