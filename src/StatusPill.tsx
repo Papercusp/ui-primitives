@@ -2,7 +2,10 @@
 
 import { Check, Circle, CircleSlash, Loader2, AlertTriangle, Clock } from 'lucide-react';
 
-type FeatureStatus = 'todo' | 'in_progress' | 'validating' | 'failing' | 'passed' | 'blocked';
+// Canonical FeatureStatus. Imported by HarnessDashboard etc. so adding
+// a new status here doesn't require editing the dashboard's local
+// duplicate.
+export type FeatureStatus = 'todo' | 'in_progress' | 'validating' | 'failing' | 'passed' | 'blocked';
 
 const ICONS: Record<FeatureStatus, typeof Check> = {
   todo: Clock,

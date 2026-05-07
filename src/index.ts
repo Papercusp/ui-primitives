@@ -8,4 +8,4 @@ export { LogView, type LogEvent, type LogTab, type LogViewProps } from './LogVie
 export { MarkdownView } from './MarkdownView';
 export { Panel } from './Panel';
 export { StatCard } from './StatCard';
-export { StatusPill } from './StatusPill';
+export { StatusPill, type FeatureStatus } from './StatusPill';
