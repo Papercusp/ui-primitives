@@ -53,6 +53,12 @@ export interface LogViewProps {
    * what was just fetched (drives the "Load older" button visibility).
    */
   onLoadOlder?: (before: string) => Promise<{ hasMore: boolean }>;
+  /**
+   * Render newest events at the top instead of the bottom. Auto-scroll
+   * sticks to the top (index 0) instead of the bottom; "Load older" appears
+   * at the bottom of the visible list. Default false (chronological).
+   */
+  newestFirst?: boolean;
 }
 
 function labelForLevel(level: LogEvent['level']): string {
@@ -417,7 +423,7 @@ async function copyToClipboard(content: string): Promise<void> {
 }
 
 export function LogView(props: LogViewProps) {
-  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId, onLoadOlder } = props;
+  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId, onLoadOlder, newestFirst = false } = props;
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -491,8 +497,8 @@ export function LogView(props: LogViewProps) {
         rows.push({ event: c.event, index: c.runStart, runLength: c.runLength, collapsedKey: key });
       }
     }
-    return rows;
-  }, [collapsed, expandedKeys, filtered]);
+    return newestFirst ? rows.slice().reverse() : rows;
+  }, [collapsed, expandedKeys, filtered, newestFirst]);
 
   const toggleCollapsed = (key: string): void => {
     setExpandedKeys((prev) => {
@@ -562,10 +568,11 @@ export function LogView(props: LogViewProps) {
       lastSeenLengthRef.current = filtered.length;
       setUnseenCount(0);
       if (atBottomRef.current && ref.current && renderRows.length > 0) {
-        ref.current.scrollToIndex({ index: renderRows.length - 1, behavior: 'auto' });
+        const targetIndex = newestFirst ? 0 : renderRows.length - 1;
+        ref.current.scrollToIndex({ index: targetIndex, behavior: 'auto' });
       }
     }
-  }, [filtered.length, paused, renderRows.length]);
+  }, [filtered.length, paused, renderRows.length, newestFirst]);
 
   const onResume = (): void => {
     setPaused(false);
@@ -573,7 +580,8 @@ export function LogView(props: LogViewProps) {
     setUnseenCount(0);
     requestAnimationFrame(() => {
       if (ref.current && renderRows.length > 0) {
-        ref.current.scrollToIndex({ index: renderRows.length - 1, behavior: 'auto' });
+        const targetIndex = newestFirst ? 0 : renderRows.length - 1;
+        ref.current.scrollToIndex({ index: targetIndex, behavior: 'auto' });
       }
     });
   };
@@ -693,8 +701,10 @@ export function LogView(props: LogViewProps) {
             data={renderRows}
             className="h-log"
             style={{ height: '100%' }}
-            atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; }}
-            followOutput={paused ? false : 'smooth'}
+            {...(newestFirst
+              ? { atTopStateChange: (atTop: boolean) => { atBottomRef.current = atTop; } }
+              : { atBottomStateChange: (atBottom: boolean) => { atBottomRef.current = atBottom; } })}
+            followOutput={newestFirst ? false : (paused ? false : 'smooth')}
             itemContent={(_, row) => {
               const isBookmarked = bookmarks.includes(bookmarkKeyFor(row.event));
               return (
