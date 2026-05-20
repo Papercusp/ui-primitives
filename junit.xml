@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="6" failures="0" errors="0" time="0.390523301">
+    <testsuite name="src/a11y.test.tsx" timestamp="2026-05-08T22:37:04.179Z" hostname="main-server-Precision-7865-Tower" tests="6" failures="0" errors="0" skipped="0" time="0.390523301">
+        <testcase classname="src/a11y.test.tsx" name="StatCard has no axe violations" time="0.136731419">
+        </testcase>
+        <testcase classname="src/a11y.test.tsx" name="StatusPill has no axe violations across statuses" time="0.114749182">
+        </testcase>
+        <testcase classname="src/a11y.test.tsx" name="JsonTree has no axe violations (object input)" time="0.063684656">
+        </testcase>
+        <testcase classname="src/a11y.test.tsx" name="JsonTree has no axe violations (primitive input)" time="0.016588441">
+        </testcase>
+        <testcase classname="src/a11y.test.tsx" name="MarkdownView has no axe violations (rich content)" time="0.046885449">
+        </testcase>
+        <testcase classname="src/a11y.test.tsx" name="MarkdownView has no axe violations (empty content)" time="0.010467916">
+        </testcase>
+    </testsuite>
+</testsuites>

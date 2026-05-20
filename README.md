@@ -11,7 +11,7 @@ Self-contained UI primitives for harness/admin UIs:
 
 ## Repos using this lib
 
-- `aviynw/Restart` — main monorepo (admin harness UI)
+- `papercupai/papercup` — main monorepo (admin harness UI)
 - `papercupai/papercup-public-site` — papercupai.com (public harness mirror)
 
 Both consume this lib via git submodule at `libs/ui-primitives/`.
