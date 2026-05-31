@@ -3,12 +3,12 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-export function MarkdownView({ source }: { source: string }) {
+export function MarkdownView({ source, emptyText = 'empty — nothing to show yet' }: { source: string; emptyText?: string }) {
   if (!source.trim()) {
     return (
       <div className="h-empty">
         <span className="h-empty-icon">—</span>
-        <span>empty — no validator runs yet</span>
+        <span>{emptyText}</span>
       </div>
     );
   }

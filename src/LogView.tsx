@@ -1,18 +1,18 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import Anser from 'anser';
 
 /**
- * Mirror of the structured log-event shape produced by the harness's
- * run.log.jsonl writer (libs/papercusp/packages/harness/run.sh) and the
- * operator's plugin host (apps/operator/lib/log-events.ts). Inlined here
- * to keep ui-primitives free of operator imports.
+ * Structured log-event shape this view renders. A neutral, self-contained
+ * contract — hosts map their own log stream onto it. `source` is a free
+ * string the host defines (e.g. a primary source plus `plugin:<slug>`,
+ * `browser`, … entries); designate one as primary via `primarySource`.
  */
 export interface LogEvent {
   ts: string;
-  source: string; // 'harness' | 'plugin:<slug>' | 'claude' | 'browser' | …
+  source: string; // host-defined, e.g. 'app' | 'plugin:<slug>' | 'browser' | …
   level: 'debug' | 'info' | 'warn' | 'error' | 'decision' | 'iteration' | 'plan';
   msg: string;
   corrId?: string;
@@ -59,7 +59,52 @@ export interface LogViewProps {
    * at the bottom of the visible list. Default false (chronological).
    */
   newestFirst?: boolean;
+  /**
+   * Domain wiring for in-message clickable ids (e.g. `feature_x`). When
+   * omitted, only URLs and file paths are linkified — no app-id links.
+   */
+  appLinks?: AppLinkConfig;
+  /**
+   * The "primary" source whose per-line source tag is hidden and which
+   * gets its own filter tab. When omitted, every source shows its tag and
+   * no extra tab is added (fully generic). E.g. set to `'harness'`.
+   */
+  primarySource?: string;
+  /** Tab label for `primarySource`. Defaults to the capitalized source name. */
+  primarySourceLabel?: string;
+  /**
+   * localStorage key prefix for pinned bookmarks (`<prefix>:<contextId>`).
+   * Default `'logBookmarks'`.
+   */
+  bookmarkKeyPrefix?: string;
 }
+
+/** Host wiring for clickable in-message app ids — domain-specific, injected. */
+export interface AppLinkConfig {
+  /** Global RegExp matching clickable id tokens inside log text. Must have the `g` flag. */
+  pattern: RegExp;
+  /** Map a matched token to a link `{ kind, id }`. Default `{ kind: 'item', id: token }`. */
+  resolve?: (token: string) => { kind: string; id: string };
+  /** CustomEvent name dispatched on click for the host to route. Default `'log-link'`. */
+  eventName?: string;
+}
+
+/** Resolved per-render config threaded to LogLine via context (no prop drilling). */
+interface LogViewConfig {
+  appIdPattern: RegExp | null;
+  resolveAppId: (token: string) => { kind: string; id: string };
+  appLinkEventName: string;
+  primarySource: string | null;
+}
+
+const DEFAULT_LOG_VIEW_CONFIG: LogViewConfig = {
+  appIdPattern: null,
+  resolveAppId: (id) => ({ kind: 'item', id }),
+  appLinkEventName: 'log-link',
+  primarySource: null,
+};
+
+const LogViewConfigContext = createContext<LogViewConfig>(DEFAULT_LOG_VIEW_CONFIG);
 
 function labelForLevel(level: LogEvent['level']): string {
   switch (level) {
@@ -84,7 +129,7 @@ function formatTs(iso: string): string {
   return `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
 }
 
-/** Strip the source prefix off a plugin slug — '@papercupai/foo' → 'foo'. */
+/** Strip the source prefix off a plugin slug — 'plugin:@scope/foo' → 'foo'. */
 function shortPluginName(source: string): string {
   if (!source.startsWith('plugin:')) return source;
   const slug = source.slice('plugin:'.length);
@@ -100,15 +145,15 @@ function shortPluginName(source: string): string {
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 // Absolute file paths: /a/b/c or C:\a\b\c — followed by an optional :line:col
 const PATH_RE = /\b([\/A-Z]:?[\w./\\-]+\.\w+)(?::(\d+)(?::(\d+))?)?\b/g;
-// Harness feature/issue ids the operator surfaces (feature_xxx, issue_xxx, snap_xxx)
-const ID_RE = /\b((?:feature|issue|snap|inv)[_-][a-z0-9_-]+)\b/g;
+// App-id linkification is host-supplied via `appLinks` (see AppLinkConfig);
+// the engine itself recognizes no domain ids.
 
 interface Segment {
   content: string;
   style?: React.CSSProperties;
   href?: string;
   /** When set, click target is local — UI handler dispatches a CustomEvent. */
-  appLink?: { kind: 'feature' | 'issue' | 'snapshot' | 'invocation'; id: string };
+  appLink?: { kind: string; id: string };
 }
 
 /**
@@ -118,6 +163,8 @@ interface Segment {
  */
 function linkifyParts(
   parts: Array<{ content: string; style: React.CSSProperties }>,
+  appIdPattern: RegExp | null,
+  resolveAppId: (token: string) => { kind: string; id: string },
 ): Segment[] {
   const out: Segment[] = [];
   for (const part of parts) {
@@ -149,19 +196,17 @@ function linkifyParts(
       const href = `vscode://file${m[0]}`;
       matches.push({ start, end, seg: { content: m[0], style: part.style, href } });
     }
-    for (const m of text.matchAll(ID_RE)) {
-      const start = m.index ?? 0;
-      const end = start + m[0].length;
-      if (overlaps(start, end)) continue;
-      const id = m[0];
-      const kind = id.startsWith('feature') ? 'feature'
-        : id.startsWith('issue') ? 'issue'
-        : id.startsWith('snap') ? 'snapshot'
-        : 'invocation';
-      matches.push({
-        start, end,
-        seg: { content: id, style: part.style, appLink: { kind, id } },
-      });
+    if (appIdPattern) {
+      for (const m of text.matchAll(appIdPattern)) {
+        const start = m.index ?? 0;
+        const end = start + m[0].length;
+        if (overlaps(start, end)) continue;
+        const { kind, id } = resolveAppId(m[0]);
+        matches.push({
+          start, end,
+          seg: { content: m[0], style: part.style, appLink: { kind, id } },
+        });
+      }
     }
     matches.sort((a, b) => a.start - b.start);
 
@@ -183,14 +228,14 @@ function linkifyParts(
 }
 
 /**
- * Click handler for in-app id links. Dispatches a CustomEvent the harness
- * dashboard (or whatever shell is hosting LogView) can listen to and
+ * Click handler for in-app id links. Dispatches a CustomEvent (name set by
+ * the host via `appLinks.eventName`) the hosting shell can listen to and
  * route to its panel selectors.
  */
-function emitAppLink(kind: string, id: string): void {
+function emitAppLink(eventName: string, kind: string, id: string): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
-    new CustomEvent('papercusp-log-link', { detail: { kind, id } }),
+    new CustomEvent(eventName, { detail: { kind, id } }),
   );
 }
 
@@ -207,6 +252,7 @@ interface LogLineProps {
 }
 
 const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, onToggleCollapse, bookmarked, onToggleBookmark }: LogLineProps) {
+  const { appIdPattern, resolveAppId, appLinkEventName, primarySource } = useContext(LogViewConfigContext);
   const segments = useMemo(() => {
     const ansi = Anser.ansiToJson(event.msg, { use_classes: false, remove_empty: true }).map((p) => ({
       content: p.content,
@@ -218,10 +264,10 @@ const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, o
         textDecoration: p.decoration === 'underline' ? 'underline' : undefined,
       } as React.CSSProperties,
     }));
-    return linkifyParts(ansi);
-  }, [event.msg]);
+    return linkifyParts(ansi, appIdPattern, resolveAppId);
+  }, [event.msg, appIdPattern, resolveAppId]);
 
-  const sourceTag = event.source === 'harness' ? null : (
+  const sourceTag = event.source === primarySource ? null : (
     <span className="h-log-source" title={event.source}>
       {shortPluginName(event.source)}
     </span>
@@ -272,7 +318,7 @@ const LogLine = memo(function LogLine({ index, event, runLength, collapsedKey, o
                 type="button"
                 style={seg.style}
                 className={`h-log-link h-log-link-app h-log-link-${a.kind}`}
-                onClick={(ev) => { ev.preventDefault(); emitAppLink(a.kind, a.id); }}
+                onClick={(ev) => { ev.preventDefault(); emitAppLink(appLinkEventName, a.kind, a.id); }}
               >
                 {seg.content}
               </button>
@@ -354,7 +400,11 @@ function TimelineScrubber({
 }
 
 /** Build the auto-derived tab strip from the events buffer. */
-function deriveTabs(events: LogEvent[]): LogTab[] {
+function deriveTabs(
+  events: LogEvent[],
+  primarySource: string | null,
+  primarySourceLabel?: string,
+): LogTab[] {
   const sources = new Set<string>();
   for (const e of events) sources.add(e.source);
   const pluginSources = Array.from(sources)
@@ -367,11 +417,14 @@ function deriveTabs(events: LogEvent[]): LogTab[] {
       filter: () => true,
       count: events.length,
     },
-    {
-      id: 'harness',
-      label: 'Harness',
-      filter: (e) => e.source === 'harness',
-    },
+    // Primary-source tab — only when the host designates one.
+    ...(primarySource
+      ? [{
+          id: primarySource,
+          label: primarySourceLabel ?? primarySource.charAt(0).toUpperCase() + primarySource.slice(1),
+          filter: (e: LogEvent) => e.source === primarySource,
+        } as LogTab]
+      : []),
     ...pluginSources.map<LogTab>((s) => ({
       id: s,
       label: shortPluginName(s),
@@ -382,8 +435,8 @@ function deriveTabs(events: LogEvent[]): LogTab[] {
 }
 
 /** Render a single LogEvent back to a tail-friendly text line for export. */
-function eventToText(e: LogEvent): string {
-  const sourceTag = e.source === 'harness' ? '' : `[${e.source}] `;
+function eventToText(e: LogEvent, primarySource: string | null): string {
+  const sourceTag = e.source === primarySource ? '' : `[${e.source}] `;
   return `[${e.ts}] ${sourceTag}${e.level.toUpperCase()}: ${e.msg}`;
 }
 
@@ -423,7 +476,13 @@ async function copyToClipboard(content: string): Promise<void> {
 }
 
 export function LogView(props: LogViewProps) {
-  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId, onLoadOlder, newestFirst = false } = props;
+  const { events, tabs: tabsProp, activeTabId: activeTabIdProp, onTabChange, contextId, onLoadOlder, newestFirst = false, appLinks, primarySource = null, primarySourceLabel, bookmarkKeyPrefix = 'logBookmarks' } = props;
+  const config = useMemo<LogViewConfig>(() => ({
+    appIdPattern: appLinks?.pattern ?? null,
+    resolveAppId: appLinks?.resolve ?? DEFAULT_LOG_VIEW_CONFIG.resolveAppId,
+    appLinkEventName: appLinks?.eventName ?? DEFAULT_LOG_VIEW_CONFIG.appLinkEventName,
+    primarySource,
+  }), [appLinks, primarySource]);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -443,7 +502,7 @@ export function LogView(props: LogViewProps) {
     onTabChange?.(id);
   };
 
-  const tabs = useMemo(() => tabsProp ?? deriveTabs(events), [tabsProp, events]);
+  const tabs = useMemo(() => tabsProp ?? deriveTabs(events, primarySource, primarySourceLabel), [tabsProp, events, primarySource, primarySourceLabel]);
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const filtered = useMemo(
     () => activeTab ? events.filter(activeTab.filter) : events,
@@ -513,7 +572,7 @@ export function LogView(props: LogViewProps) {
   // is `${ts}:${source}:${level}:${msg.slice(0, 80)}` — readable + stable
   // across stream reconnects (events keep their ts when re-replayed).
   // Renders as a strip of pin chips above the log; click to jump.
-  const bookmarkStorageKey = contextId ? `papercusp:logBookmarks:${contextId}` : null;
+  const bookmarkStorageKey = contextId ? `${bookmarkKeyPrefix}:${contextId}` : null;
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   useEffect(() => {
     if (!bookmarkStorageKey || typeof window === 'undefined') return;
@@ -587,6 +646,7 @@ export function LogView(props: LogViewProps) {
   };
 
   return (
+    <LogViewConfigContext.Provider value={config}>
     <div className="h-log-container">
       <div className="h-log-tabs" role="tablist">
         {tabs.map((tab) => {
@@ -612,7 +672,7 @@ export function LogView(props: LogViewProps) {
             type="button"
             className="h-log-toolbar-btn"
             onClick={() => {
-              const text = filtered.map(eventToText).join('\n') + '\n';
+              const text = filtered.map((e) => eventToText(e, primarySource)).join('\n') + '\n';
               const name = `${contextId ?? 'log'}-${activeTab?.id ?? 'all'}.log`;
               downloadAs(name, 'text/plain', text);
             }}
@@ -733,5 +793,6 @@ export function LogView(props: LogViewProps) {
         </div>
       )}
     </div>
+    </LogViewConfigContext.Provider>
   );
 }
