@@ -1,7 +1,7 @@
 import type { CustomProjectConfig } from 'lost-pixel';
 
 /**
- * Lost Pixel — visual regression for the @restart/ui-primitives stories.
+ * Lost Pixel — visual regression for the @papercusp/ui-primitives stories.
  *
  * Per testing-spec §1.11: Storybook stories ARE the test cases. Adding
  * a story = adding a visual test. Run:

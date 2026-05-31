@@ -1,4 +1,4 @@
-# @restart/ui-primitives
+# @papercusp/ui-primitives
 
 Self-contained UI primitives for harness/admin UIs:
 

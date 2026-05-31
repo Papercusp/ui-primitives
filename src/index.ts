@@ -1,4 +1,4 @@
-// @restart/ui-primitives — self-contained UI primitives for harness/admin UIs.
+// @papercusp/ui-primitives — self-contained UI primitives for harness/admin UIs.
 //
 // Pure peer-dep React components. No internal coupling beyond npm packages.
 // Intended for cross-app reuse via git submodule.
