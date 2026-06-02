@@ -9,3 +9,18 @@ export { MarkdownView } from './MarkdownView';
 export { Panel } from './Panel';
 export { StatCard } from './StatCard';
 export { StatusPill, type FeatureStatus } from './StatusPill';
+
+// Theme system — headless [data-theme] switcher + framework-agnostic runtime.
+export {
+  ThemeSwitcher,
+  type ThemeOption,
+  type ThemeSwitcherProps,
+  useTheme,
+  applyTheme,
+  getActiveTheme,
+  subscribe as subscribeTheme,
+  STORAGE_KEY as THEME_STORAGE_KEY,
+  THEME_EVENT,
+  DEFAULT_THEME,
+  PREPAINT_SNIPPET,
+} from './theme';
