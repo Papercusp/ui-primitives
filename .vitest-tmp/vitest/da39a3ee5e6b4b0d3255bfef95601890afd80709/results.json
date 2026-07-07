@@ -1,1 +1,1 @@
-{"version":"4.1.8","results":[[":src/override/OverridableSetting.test.tsx",{"duration":221.85291600000005,"failed":false}],[":src/a11y.test.tsx",{"duration":397.81205799999975,"failed":false}],[":src/override/isOverridden.test.ts",{"duration":8.868028999999979,"failed":false}]]}
+{"version":"4.1.8","results":[[":src/override/OverridableSetting.test.tsx",{"duration":168.85443400000008,"failed":false}],[":src/a11y.test.tsx",{"duration":300.7844580000001,"failed":false}],[":src/override/isOverridden.test.ts",{"duration":7.079282000000035,"failed":false}]]}
