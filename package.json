@@ -34,7 +34,6 @@
     "lostpixel:update": "LOST_PIXEL_GENERATE_ONLY=1 lost-pixel"
   },
   "devDependencies": {
-    "@papercusp/test-config": "*",
     "@storybook/addon-docs": "^10.3.6",
     "@storybook/react-vite": "^10.3.6",
     "@testing-library/dom": "^10.4.1",
