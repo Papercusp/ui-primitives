@@ -166,7 +166,7 @@ describe('shared plan reader components', () => {
         showFrontmatter={false}
       />,
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('showing raw text');
+    expect((await screen.findByRole('status')).textContent).toContain('showing raw text');
     expect(screen.getByText('# Still readable')).toBeTruthy();
   });
 });

@@ -481,8 +481,10 @@ export function PlanDocumentView({
           let target = event.target as HTMLElement | null;
           while (target && target !== outlineRef.current) {
             const targetId = target.getAttribute?.('data-target-id');
-            if (targetId && PLAN_ID_RE.test(targetId) || targetId) {
-              const heading = previewRef.current?.querySelector<HTMLElement>(`#${targetId}`);
+            if (targetId) {
+              const heading = Array.from(
+                previewRef.current?.querySelectorAll<HTMLElement>('[id]') ?? [],
+              ).find((element) => element.id === targetId);
               if (heading) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -548,7 +550,7 @@ const outlinePanelStyle: CSSProperties = {
 };
 
 const planDocumentCss = `
-  .pc-plan-document { min-width: 0; min-height: 0; }
+  .pc-plan-document { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
   .pc-plan-document__preview { flex: 1 1 auto; min-width: 0; min-height: 0; }
   .pc-plan-document .pc-md-outline ul { list-style: none; padding-left: 12px; margin: 0; }
   .pc-plan-document .pc-md-outline > ul { padding-left: 0; }
