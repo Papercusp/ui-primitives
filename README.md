@@ -5,6 +5,8 @@ Self-contained, **domain-agnostic** UI primitives for admin/dashboard UIs:
 - `JsonTree` — collapsible JSON viewer (react-json-view-lite based)
 - `LogView` — virtualized ANSI-colored log viewer (react-virtuoso + anser)
 - `MarkdownView` — markdown renderer (react-markdown + remark-gfm)
+- `PlanDocumentView` — read-only Vditor plan reader with local-runtime assets,
+  frontmatter, outline navigation, plan/decision refs, and jump search
 - `Panel` — generic panel container with title/actions slots
 - `StatCard` — stat display with label + value + optional sub
 - `StatusPill` — colored status badge (icon + label)
@@ -42,3 +44,5 @@ Both consume this lib via git submodule at `libs/ui-primitives/`.
 ## Peer deps
 
 Host app must provide: `react`, plus the runtime deps listed in `peerDependencies`.
+`PlanDocumentView` defaults its Vditor runtime mirror to `/vditor`; hosts must
+copy Vditor's `dist/` assets there or pass a different `assetBaseUrl`.

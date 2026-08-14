@@ -24,7 +24,8 @@
     "react-json-view-lite": "*",
     "react-markdown": "*",
     "react-virtuoso": "*",
-    "remark-gfm": "*"
+    "remark-gfm": "*",
+    "vditor": "^3.11.2"
   },
   "scripts": {
     "test": "vitest run --passWithNoTests",
@@ -43,6 +44,7 @@
     "lost-pixel": "^3.22.0",
     "storybook": "^10.3.6",
     "vitest": "^4.1.4",
-    "vitest-axe": "^0.1.0"
+    "vitest-axe": "^0.1.0",
+    "vditor": "^3.11.2"
   }
 }

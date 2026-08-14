@@ -6,6 +6,24 @@
 export { JsonTree } from './JsonTree';
 export { LogView, type LogEvent, type LogTab, type LogViewProps, type AppLinkConfig } from './LogView';
 export { MarkdownView } from './MarkdownView';
+export {
+  PlanDocumentView,
+  PlanDocumentJump,
+  PlanDocumentFrontmatter,
+  attachPlanDocumentRefClickHandler,
+  decoratePlanDocumentDom,
+  expandPlanDocumentWikiLinks,
+  findPlanDocumentHeading,
+  neutralizePlanDocumentPlantuml,
+  rankPlanDocumentCandidates,
+  scrollPlanDocumentTarget,
+  stripPlanFrontmatter,
+  PLANTUML_NEUTRALIZED_CLASS,
+  type PlanDocumentCandidate,
+  type PlanDocumentDecision,
+  type PlanDocumentItem,
+  type PlanDocumentViewProps,
+} from './PlanDocumentView';
 export { Panel } from './Panel';
 export { StatCard } from './StatCard';
 export { StatusPill, type FeatureStatus } from './StatusPill';
