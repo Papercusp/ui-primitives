@@ -4,6 +4,7 @@ build/
 storybook-static/
 lostpixel-current/
 lostpixel-diff/
+.vitest-tmp/
 *.tsbuildinfo
 .DS_Store
 
