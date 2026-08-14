@@ -23,7 +23,7 @@ export interface PlanDocumentItem {
 /** Minimal decision shape needed by jump search. */
 export interface PlanDocumentDecision {
   id: string;
-  title?: string;
+  title?: string | null;
 }
 
 export interface PlanDocumentCandidate {
