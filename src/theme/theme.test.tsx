@@ -98,6 +98,7 @@ test('ThemeSwitcher renders the themes and switches on click', () => {
 });
 
 test('ThemeSwitcher falls back to a default icon for an unknown theme id', () => {
+  // A theme id with no icon mapping must not crash the subtree (?? guard).
   expect(() =>
     render(<ThemeSwitcher themes={[{ id: 'neon', label: 'Neon' }]} />),
   ).not.toThrow();

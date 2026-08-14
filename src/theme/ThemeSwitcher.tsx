@@ -59,7 +59,7 @@ export function ThemeSwitcher({ themes, icons = DEFAULT_ICONS, className }: Them
   return (
     <div role="group" aria-label="Theme" className={className} style={wrapStyle}>
       {themes.map((t) => {
-        const Icon = icons[t.id] ?? Palette;
+        const Icon = icons[t.id] ?? Palette; // ?? guard — a missing key never crashes the subtree
         const active = theme === t.id;
         return (
           <button
