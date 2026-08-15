@@ -15,6 +15,7 @@ export {
   expandPlanDocumentWikiLinks,
   findPlanDocumentHeading,
   neutralizePlanDocumentPlantuml,
+  planDocumentFallbackSurface,
   rankPlanDocumentCandidates,
   scrollPlanDocumentTarget,
   stripPlanFrontmatter,
@@ -22,6 +23,7 @@ export {
   type PlanDocumentCandidate,
   type PlanDocumentDecision,
   type PlanDocumentItem,
+  type PlanDocumentTheme,
   type PlanDocumentViewProps,
 } from './PlanDocumentView';
 export { Panel } from './Panel';

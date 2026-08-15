@@ -33,6 +33,8 @@ export interface PlanDocumentCandidate {
   kind: 'item' | 'decision';
 }
 
+export type PlanDocumentTheme = 'dark' | 'light';
+
 export interface PlanDocumentViewProps {
   /** Complete plan markdown. Leading frontmatter is stripped when metadata is supplied. */
   value: string;
@@ -46,7 +48,7 @@ export interface PlanDocumentViewProps {
   showFrontmatter?: boolean;
   /** Root-relative Vditor runtime mirror. Must be supplied by the host app. */
   assetBaseUrl?: string;
-  theme?: 'dark' | 'light';
+  theme?: PlanDocumentTheme;
   className?: string;
   style?: CSSProperties;
   /** Host-specific decorators run after the shared plan decorations. */
@@ -408,11 +410,31 @@ function loadVditorCss(): Promise<unknown> {
   return vditorCssPromise;
 }
 
-function PlanDocumentFallback({ value }: { value: string }) {
+/**
+ * Foreground and background for the raw-text fallback, ALWAYS returned as a
+ * pair from one theme decision.
+ *
+ * This exists because splitting the two is how the fallback silently became
+ * unreadable (WI-39341): the stylesheet hardcoded a dark `background:#19232A`
+ * but took `color: var(--fg)` from the host, so on a light-themed host the
+ * pair disagreed — measured at roughly 1.1:1 contrast, i.e. invisible. A
+ * failed renderer then looked like a broken button rather than a degraded one.
+ * Returning both halves together makes that class of desync unrepresentable.
+ */
+export function planDocumentFallbackSurface(theme: PlanDocumentTheme): {
+  background: string;
+  color: string;
+} {
+  return theme === 'dark'
+    ? { background: '#19232A', color: '#e6e6e6' }
+    : { background: '#f3f1ed', color: '#28231f' };
+}
+
+function PlanDocumentFallback({ value, theme }: { value: string; theme: PlanDocumentTheme }) {
   return (
     <div className="pc-plan-document__fallback" role="status">
       <p>Couldn&rsquo;t load the plan renderer — showing raw text.</p>
-      <pre>{value}</pre>
+      <pre style={planDocumentFallbackSurface(theme)}>{value}</pre>
     </div>
   );
 }
@@ -510,7 +532,7 @@ export function PlanDocumentView({
   }, [assetBaseUrl, body, items, outline, theme]);
 
   const preview = loadError ? (
-    <PlanDocumentFallback value={body} />
+    <PlanDocumentFallback value={body} theme={theme} />
   ) : (
     <div
       ref={previewRef}
@@ -559,7 +581,10 @@ const planDocumentCss = `
   .pc-plan-document .pc-md-outline a:hover { color: #fff; background: #232E37; }
   .pc-plan-document__fallback { flex: 1 1 auto; min-width: 0; border: 1px solid var(--border, rgba(125,211,252,.18)); border-radius: 8px; overflow: hidden; }
   .pc-plan-document__fallback p { margin: 0; padding: 8px 12px; color: var(--fg-mute, #7f9bb4); border-bottom: 1px solid var(--border, rgba(125,211,252,.18)); }
-  .pc-plan-document__fallback pre { margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg, #e6e6e6); background: #19232A; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  /* Colours deliberately absent: planDocumentFallbackSurface() supplies the
+     foreground/background PAIR inline, so they can never come from different
+     sources and disagree (WI-39341). Do not reintroduce a colour here. */
+  .pc-plan-document__fallback pre { margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .pc-plan-document .pc-md-preview :is(pre, pre code) { background: color-mix(in srgb, var(--bg-popover, #0d1829), transparent 6%) !important; color: var(--fg, #e7f7ff) !important; }
   .pc-plan-document .pc-md-preview pre { border: 1px solid var(--border-strong, rgba(125,211,252,.32)) !important; border-radius: 12px !important; }
   .pc-plan-document .pc-md-preview :is(code.language-yaml, code.language-yml, code.language-frontmatter, pre code:first-child) { color: var(--fg, #e7f7ff) !important; }
