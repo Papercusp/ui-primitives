@@ -12,6 +12,13 @@ export default defineConfig({
     environment: 'jsdom',
     exclude: ['node_modules', 'dist'],
     testTimeout: 15_000,
+    // Vitest 4 refuses to run projects that share a `sequence.groupOrder` while
+    // declaring DIFFERENT maxWorkers. Every other project in the root topology
+    // takes its cap from `sharedHostWorkerCap()`; this one CANNOT import that
+    // (see the note above — no sibling libs/test-config in the standalone repo),
+    // so it gets a group of its own rather than a hand-copied cap that would
+    // silently drift out of step with the shared one.
+    sequence: { groupOrder: 4 },
   },
   esbuild: { jsx: 'automatic' },
 });
