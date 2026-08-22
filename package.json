@@ -18,6 +18,7 @@
     }
   },
   "peerDependencies": {
+    "@radix-ui/react-dialog": "^1.1.0",
     "anser": "*",
     "lucide-react": "*",
     "react": "^18 || ^19",
