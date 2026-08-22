@@ -29,6 +29,35 @@ export {
 export { Panel } from './Panel';
 export { StatCard } from './StatCard';
 export { StatusPill, type FeatureStatus } from './StatusPill';
+export {
+  BuildHistoryList,
+  ProjectHistoryView,
+  filterBuildHistory,
+  formatBuildDate,
+  historyDocumentCloseHref,
+  historyDocumentHref,
+  historyHref,
+  planCommits,
+  summarizeBuildHistory,
+  summarizeBuildItemEvidence,
+  type BuildHistoryCommit,
+  type BuildHistoryDateFilter,
+  type BuildHistoryDecision,
+  type BuildHistoryFilters,
+  type BuildHistoryPlan,
+  type BuildHistoryPlanItem,
+  type BuildHistoryProject,
+  type BuildHistoryRepository,
+  type BuildHistorySnapshotSource,
+  type BuildHistoryTarget,
+  type BuildHistoryValidationAssertion,
+  type BuildHistoryValidationStatus,
+  type BuildHistoryValidationSummary,
+  type BuildHistoryWorkItem,
+  type ProjectHistoryPlan,
+  type ProjectHistoryTarget,
+  type ProjectHistoryWorkItem,
+} from './ProjectHistoryView';
 
 // Theme system — headless [data-theme] switcher + framework-agnostic runtime.
 export {
