@@ -104,3 +104,20 @@ test('ThemeSwitcher falls back to a default icon for an unknown theme id', () =>
   ).not.toThrow();
   expect(screen.getByRole('button', { name: 'Neon' })).toBeTruthy();
 });
+
+test('ThemeSwitcher supports a controlled persisted-account value', () => {
+  const onChange = vi.fn();
+  render(<ThemeSwitcher
+    themes={[
+      { id: 'light', label: 'Light' },
+      { id: 'system', label: 'System' },
+      { id: 'dark', label: 'Dark' },
+    ]}
+    value="system"
+    onChange={onChange}
+  />);
+
+  expect(screen.getByRole('button', { name: 'System' }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
+  expect(onChange).toHaveBeenCalledWith('dark');
+});
