@@ -11,6 +11,16 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./controls": {
+      "types": "./src/controls/index.ts",
+      "import": "./src/controls/index.ts",
+      "default": "./src/controls/index.ts"
+    },
+    "./theme": {
+      "types": "./src/theme/index.ts",
+      "import": "./src/theme/index.ts",
+      "default": "./src/theme/index.ts"
+    },
     "./override": {
       "types": "./src/override/index.ts",
       "import": "./src/override/index.ts",
