@@ -37,6 +37,8 @@ export {
   historyDocumentCloseHref,
   historyDocumentHref,
   historyHref,
+  historyWorkItemCloseHref,
+  historyWorkItemHref,
   planCommits,
   summarizeBuildHistory,
   summarizeBuildItemEvidence,

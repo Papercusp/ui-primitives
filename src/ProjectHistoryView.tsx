@@ -650,6 +650,38 @@ const BuildItem = memo(function BuildItem({
           {item.completionAuthority ? <span>{item.completionAuthority}</span> : null}
           <a href={href}>Permalink</a>
         </div>
+        {workItemHref || planHref ? (
+          <div className="build-item-actions">
+            {workItemHref ? (
+              <a
+                className="button small"
+                href={workItemHref}
+                aria-label={`Read the full work item ${itemRef}`}
+                onClick={(event) => {
+                  if (!isPlainPrimaryClick(event)) return;
+                  event.preventDefault();
+                  onOpenWorkItem(plan, item, event.currentTarget);
+                }}
+              >
+                Read full work item
+              </a>
+            ) : null}
+            {planHref ? (
+              <a
+                className="button ghost small"
+                href={planHref}
+                aria-label={`Read the full plan for ${itemRef || planRef}`}
+                onClick={(event) => {
+                  if (!isPlainPrimaryClick(event)) return;
+                  event.preventDefault();
+                  onOpenDocument(plan, event.currentTarget);
+                }}
+              >
+                Read full plan
+              </a>
+            ) : null}
+          </div>
+        ) : null}
         <div className="build-item-evidence-grid">
           <EvidenceBlock title="What changed" lines={summary.changed} empty="No completion summary was attached." />
           <EvidenceBlock title="Verification" lines={summary.verification} empty="No structured verification result was attached." />
@@ -666,10 +698,12 @@ function BuildPlanDetails({
   plan,
   targetItem,
   onOpenDocument,
+  onOpenWorkItem,
 }: {
   plan: BuildHistoryPlan;
   targetItem: string | null;
   onOpenDocument: (plan: BuildHistoryPlan, trigger: HTMLAnchorElement) => void;
+  onOpenWorkItem: (plan: BuildHistoryPlan, item: BuildHistoryWorkItem, trigger: HTMLAnchorElement) => void;
 }) {
   const items = useMemo(() => sortedItems(plan), [plan]);
   const [showItems, setShowItems] = useState(Boolean(targetItem));
@@ -711,6 +745,20 @@ function BuildPlanDetails({
         >
           Read full plan
         </a>
+        {latest ? (
+          <a
+            className="button small"
+            href={historyWorkItemHref(plan.slug, latest.id, typeof window === 'undefined' ? '/' : window.location.href)}
+            aria-label={`Read the full work item ${latest.id}`}
+            onClick={(event) => {
+              if (!isPlainPrimaryClick(event)) return;
+              event.preventDefault();
+              onOpenWorkItem(plan, latest, event.currentTarget);
+            }}
+          >
+            Read full work item
+          </a>
+        ) : null}
         <CopyLinkButton href={planHref} label="Copy plan link" />
         {plan.project.repository?.webUrl ? (
           <a
@@ -731,7 +779,15 @@ function BuildPlanDetails({
           <>
             {items.length > 0 ? (
               <ol className="build-item-list">
-                {visibleItems.map((item) => <BuildItem item={item} planSlug={plan.slug} key={item.id} />)}
+                {visibleItems.map((item) => (
+                  <BuildItem
+                    item={item}
+                    plan={plan}
+                    onOpenDocument={onOpenDocument}
+                    onOpenWorkItem={onOpenWorkItem}
+                    key={item.id}
+                  />
+                ))}
               </ol>
             ) : <p className="build-plan-empty">This plan has no completed work items yet.</p>}
             {itemLimit < items.length ? (
@@ -752,12 +808,14 @@ function BuildPlanCard({
   targetItem,
   onToggle,
   onOpenDocument,
+  onOpenWorkItem,
 }: {
   plan: BuildHistoryPlan;
   open: boolean;
   targetItem: string | null;
   onToggle: (open: boolean) => void;
   onOpenDocument: (plan: BuildHistoryPlan, trigger: HTMLAnchorElement) => void;
+  onOpenWorkItem: (plan: BuildHistoryPlan, item: BuildHistoryWorkItem, trigger: HTMLAnchorElement) => void;
 }) {
   const latest = sortedItems(plan)[0] ?? null;
   const commitCount = plan.completedItems.reduce((count, item) => count + item.commits.length, 0);
@@ -788,7 +846,12 @@ function BuildPlanCard({
         <span className="build-plan-disclosure" aria-hidden="true">{open ? '−' : '+'}</span>
       </summary>
       {open ? (
-        <BuildPlanDetails plan={plan} targetItem={targetItem} onOpenDocument={onOpenDocument} />
+        <BuildPlanDetails
+          plan={plan}
+          targetItem={targetItem}
+          onOpenDocument={onOpenDocument}
+          onOpenWorkItem={onOpenWorkItem}
+        />
       ) : null}
     </details>
   );
@@ -891,6 +954,112 @@ function BuildPlanDialog({
   );
 }
 
+/**
+ * The work-item half of the owner's request (WI-38718): the plan record has had
+ * `BuildPlanDialog` since History shipped, and this is its counterpart — the full,
+ * UNTRUNCATED record of one completed work item, addressable by `?work-item=`.
+ */
+function BuildWorkItemDialog({
+  workItemId,
+  match,
+  returnFocusRef,
+  onClose,
+}: {
+  workItemId: string | null;
+  match: { item: BuildHistoryWorkItem; plan: BuildHistoryPlan } | null;
+  returnFocusRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
+  const evidence = match ? fullBuildItemEvidence(match.item) : null;
+  return (
+    <Dialog.Root open={Boolean(workItemId)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="build-plan-dialog-overlay" />
+        <Dialog.Content
+          className="build-plan-dialog build-work-item-dialog"
+          onCloseAutoFocus={(event) => {
+            const trigger = returnFocusRef.current;
+            if (!trigger?.isConnected) return;
+            event.preventDefault();
+            trigger.focus();
+          }}
+        >
+          <header className="build-plan-dialog-header">
+            <div>
+              <span className="build-plan-dialog-eyebrow">Read-only work-item record</span>
+              <Dialog.Title>{match?.item.title ?? 'Work item unavailable'}</Dialog.Title>
+              <Dialog.Description>
+                {match
+                  ? 'The complete committed work-item record, including its full completion evidence and commits.'
+                  : `No committed History snapshot contains ${workItemId ?? 'this work item'}.`}
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="build-plan-dialog-close" type="button" aria-label="Close work item">
+                <span aria-hidden="true">×</span>
+              </button>
+            </Dialog.Close>
+          </header>
+
+          {match && evidence ? (
+            /* One scrollable body: the plan dialog's 3-row grid ends in the document
+               pane, but a work-item record has no single tall child to give the
+               remaining row, so it scrolls as a whole instead. */
+            <div className="build-work-item-dialog-body">
+              <dl className="build-plan-dialog-provenance" aria-label="Work item provenance">
+                <div>
+                  <dt>Work item</dt>
+                  <dd><code>{match.item.id}</code></dd>
+                </div>
+                <div>
+                  <dt>Kind</dt>
+                  <dd>{match.item.kind}</dd>
+                </div>
+                <div>
+                  <dt>State</dt>
+                  <dd>{match.item.state}</dd>
+                </div>
+                <div>
+                  <dt>Completed</dt>
+                  <dd>
+                    <time dateTime={match.item.completedAt ?? undefined}>
+                      {formatBuildDate(match.item.completedAt)}
+                    </time>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Authority</dt>
+                  <dd>{match.item.completionAuthority ?? 'Not recorded'}</dd>
+                </div>
+                <div>
+                  <dt>Plan</dt>
+                  <dd>
+                    {/* The reverse link: a work item must reach its plan without hunting. */}
+                    <a href={historyDocumentHref(match.plan.slug, typeof window === 'undefined' ? '/' : window.location.href)}>
+                      {match.plan.title}
+                    </a>
+                  </dd>
+                </div>
+              </dl>
+              <div className="build-item-evidence-grid build-work-item-dialog-evidence">
+                <EvidenceBlock title="What changed" lines={evidence.changed} empty="No completion summary was attached." />
+                <EvidenceBlock title="Verification" lines={evidence.verification} empty="No structured verification result was attached." />
+                <EvidenceBlock title="Files" lines={evidence.files} empty="No changed-file list was attached." />
+              </div>
+              <BuildItemCommits item={match.item} />
+            </div>
+          ) : (
+            <div className="build-plan-dialog-missing" role="alert">
+              <strong>This work item is not in the committed History snapshot.</strong>
+              <p>Close the viewer and choose a work item from the current History list.</p>
+            </div>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 function BuildHistoryMetrics({ plans, now }: { plans: readonly BuildHistoryPlan[]; now: Date }) {
   const summary = summarizeBuildHistory(plans, now);
   return (
@@ -933,11 +1102,13 @@ export function BuildHistoryList({
   plans,
   initialTarget = null,
   initialDocument = null,
+  initialWorkItem = null,
   now = new Date(),
 }: {
   plans: readonly BuildHistoryPlan[];
   initialTarget?: BuildHistoryTarget | null;
   initialDocument?: string | null;
+  initialWorkItem?: string | null;
   now?: Date;
 }) {
   const [search, setSearch] = useState('');
@@ -952,6 +1123,8 @@ export function BuildHistoryList({
   const [planLimit, setPlanLimit] = useState(PLAN_PAGE_SIZE);
   const [documentSlug, setDocumentSlug] = useState(initialDocument);
   const documentTriggerRef = useRef<HTMLElement | null>(null);
+  const [workItemId, setWorkItemId] = useState(initialWorkItem);
+  const workItemTriggerRef = useRef<HTMLElement | null>(null);
   const [openPlans, setOpenPlans] = useState<Set<string>>(() => (
     initialTarget ? new Set([initialTarget.plan]) : new Set()
   ));
@@ -970,10 +1143,23 @@ export function BuildHistoryList({
   const preservedOpenPlans = plans.filter((plan) => openPlans.has(plan.slug) && !pagedPlans.includes(plan));
   const displayedPlans = [...pagedPlans, ...preservedOpenPlans];
   const documentPlan = plans.find((plan) => plan.slug === documentSlug) ?? null;
+  // Resolve `?work-item=` against the WHOLE snapshot, not just the visible page:
+  // a permalink must open its record even when filters exclude the owning plan.
+  const workItemMatch = useMemo(() => {
+    if (!workItemId) return null;
+    for (const plan of plans) {
+      const item = plan.completedItems.find((candidate) => candidate.id === workItemId);
+      if (item) return { item, plan };
+    }
+    return null;
+  }, [plans, workItemId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const onPopState = () => setDocumentSlug(readHistoryDocument());
+    const onPopState = () => {
+      setDocumentSlug(readHistoryDocument());
+      setWorkItemId(readHistoryWorkItem());
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
@@ -1009,6 +1195,9 @@ export function BuildHistoryList({
         historyDocumentHref(plan.slug, window.location.href),
       );
     }
+    // historyDocumentHref drops `work-item`, so the URL already says one viewer;
+    // keep the rendered state in step or both dialogs stack.
+    setWorkItemId(null);
     setDocumentSlug(plan.slug);
   };
 
@@ -1034,7 +1223,50 @@ export function BuildHistoryList({
     setDocumentSlug(null);
   };
 
-  if (plans.length === 0 && !documentSlug) {
+  const openWorkItem = (
+    plan: BuildHistoryPlan,
+    item: BuildHistoryWorkItem,
+    trigger: HTMLAnchorElement,
+  ) => {
+    workItemTriggerRef.current = trigger;
+    if (typeof window !== 'undefined') {
+      const currentState = window.history.state;
+      const state = currentState && typeof currentState === 'object' ? currentState : {};
+      window.history.pushState(
+        { ...state, [HISTORY_WORK_ITEM_STATE]: item.id },
+        '',
+        historyWorkItemHref(plan.slug, item.id, window.location.href),
+      );
+    }
+    setDocumentSlug(null);
+    setWorkItemId(item.id);
+  };
+
+  const closeWorkItem = () => {
+    if (typeof window === 'undefined') {
+      setWorkItemId(null);
+      return;
+    }
+    const currentState = window.history.state;
+    // If WE pushed this entry, go back so the Back button stays honest; otherwise
+    // the record was deep-linked and there is no entry of ours to pop.
+    if (
+      currentState
+      && typeof currentState === 'object'
+      && currentState[HISTORY_WORK_ITEM_STATE] === workItemId
+    ) {
+      window.history.back();
+      return;
+    }
+    const state = currentState && typeof currentState === 'object'
+      ? { ...currentState }
+      : {};
+    delete state[HISTORY_WORK_ITEM_STATE];
+    window.history.replaceState(state, '', historyWorkItemCloseHref(window.location.href));
+    setWorkItemId(null);
+  };
+
+  if (plans.length === 0 && !documentSlug && !workItemId) {
     return (
       <div className="build-history-empty">
         <span aria-hidden="true">◇</span>
@@ -1051,6 +1283,12 @@ export function BuildHistoryList({
         plan={documentPlan}
         returnFocusRef={documentTriggerRef}
         onClose={closeDocument}
+      />
+      <BuildWorkItemDialog
+        workItemId={workItemId}
+        match={workItemMatch}
+        returnFocusRef={workItemTriggerRef}
+        onClose={closeWorkItem}
       />
       <BuildHistoryMetrics plans={plans} now={now} />
       <section className="build-history-toolbar" aria-label="Release filters">
@@ -1114,6 +1352,7 @@ export function BuildHistoryList({
                 return next;
               })}
               onOpenDocument={openDocument}
+              onOpenWorkItem={openWorkItem}
               key={plan.slug}
             />
           ))}
