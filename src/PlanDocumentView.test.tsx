@@ -284,6 +284,9 @@ describe('shared plan reader components', () => {
     expect(styles).toContain("[data-plan-outline-kind='item']");
     expect(styles).toContain(":focus-visible");
     expect(styles).toContain("[aria-current='location']");
+    expect(styles).toContain(
+      ".pc-plan-document { container-type: inline-size;",
+    );
     expect(styles).toContain("@container (max-width: 680px)");
   });
 

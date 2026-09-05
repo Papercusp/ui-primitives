@@ -799,8 +799,8 @@ export function PlanDocumentView({
 }
 
 const planDocumentCss = `
-  .pc-plan-document { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
-  .pc-plan-document__body { container-type: inline-size; display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; gap: clamp(10px, 2vw, 18px); }
+  .pc-plan-document { container-type: inline-size; display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
+  .pc-plan-document__body { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; gap: clamp(10px, 2vw, 18px); }
   .pc-plan-document__preview { flex: 1 1 auto; min-width: 0; min-height: 0; background: var(--bg-1, #19232a) !important; color: var(--fg, #e6e6e6) !important; }
   .pc-plan-document .pc-md-outline-shell { position: sticky; top: 0; align-self: flex-start; display: flex; flex: 0 0 clamp(190px, 22cqi, 248px); flex-direction: column; width: clamp(190px, 22cqi, 248px); max-height: min(72vh, calc(100vh - 100px)); overflow: hidden; color: var(--fg-mute, #7f9bb4); background: color-mix(in srgb, var(--bg-2, #111b2d), transparent 8%); border: 1px solid var(--border, rgba(125,211,252,.18)); border-radius: 10px; }
   .pc-plan-document .pc-md-outline__header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 9px 10px 8px; color: var(--fg, #e7f7ff); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--border, rgba(125,211,252,.18)); }
