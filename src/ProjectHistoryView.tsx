@@ -618,7 +618,11 @@ const BuildItem = memo(function BuildItem({
   item: BuildHistoryWorkItem;
   plan: BuildHistoryPlan;
   onOpenDocument: (plan: BuildHistoryPlan, trigger: HTMLAnchorElement) => void;
-  onOpenWorkItem: (plan: BuildHistoryPlan, item: BuildHistoryWorkItem, trigger: HTMLAnchorElement) => void;
+  // Optional until the work-item opener is wired top-down (no ProjectHistoryView
+  // handler exists for it yet); the call site in BuildPlanDetails threads what
+  // the tree already has. Compile-unblock by su-e8071 2026-09-05 16:03Z — the
+  // portal build (which compiles this file) was red on the call site.
+  onOpenWorkItem?: (plan: BuildHistoryPlan, item: BuildHistoryWorkItem, trigger: HTMLAnchorElement) => void;
 }) {
   const planSlug = plan.slug;
   const summary = summarizeBuildItemEvidence(item);
@@ -731,7 +735,9 @@ function BuildPlanDetails({
           <>
             {items.length > 0 ? (
               <ol className="build-item-list">
-                {visibleItems.map((item) => <BuildItem item={item} planSlug={plan.slug} key={item.id} />)}
+                {visibleItems.map((item) => (
+                  <BuildItem item={item} plan={plan} onOpenDocument={onOpenDocument} key={item.id} />
+                ))}
               </ol>
             ) : <p className="build-plan-empty">This plan has no completed work items yet.</p>}
             {itemLimit < items.length ? (
