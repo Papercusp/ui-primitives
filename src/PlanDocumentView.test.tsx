@@ -24,8 +24,9 @@ import {
   decoratePlanDocumentDom,
   neutralizePlanDocumentPlantuml,
   rankPlanDocumentCandidates,
+  resolvePlanDocumentTheme,
   stripPlanFrontmatter,
-} from './PlanDocumentView';
+} from "./PlanDocumentView";
 
 afterEach(() => {
   cleanup();
@@ -33,6 +34,8 @@ afterEach(() => {
   previewSpy.mockReset();
   outlineSpy.mockReset();
   vi.useRealTimers();
+  delete document.documentElement.dataset.theme;
+  document.documentElement.style.removeProperty("--bg");
 });
 
 describe('shared plan document transforms', () => {
@@ -154,6 +157,134 @@ describe('shared plan reader components', () => {
     expect(previewSpy.mock.calls[0]?.[1]).toBe('Body');
     expect(previewSpy.mock.calls[0]?.[2]).toMatchObject({ cdn: '/vditor', anchor: 1 });
     expect(onParsed).toHaveBeenCalledOnce();
+  });
+
+  it("inherits light, dark, and live host theme changes when no override is supplied", async () => {
+    document.documentElement.dataset.theme = "light";
+    document.documentElement.style.setProperty("--bg", "#f4f0e8");
+    expect(resolvePlanDocumentTheme()).toBe("light");
+
+    render(
+      <PlanDocumentView
+        value="# Theme"
+        outline={false}
+        showJump={false}
+        showFrontmatter={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(previewSpy.mock.calls.at(-1)?.[2]).toMatchObject({
+        mode: "light",
+        theme: { current: "light" },
+      });
+    });
+
+    document.documentElement.dataset.theme = "dark";
+    document.documentElement.style.setProperty("--bg", "#191817");
+    window.dispatchEvent(new CustomEvent("papercusp:theme-changed"));
+    await waitFor(() => {
+      expect(previewSpy.mock.calls.at(-1)?.[2]).toMatchObject({
+        mode: "dark",
+        theme: { current: "dark" },
+      });
+    });
+
+    delete document.documentElement.dataset.theme;
+    document.documentElement.style.setProperty("--bg", "#f4f0e8");
+    window.dispatchEvent(new CustomEvent("papercusp:theme-changed"));
+    await waitFor(() => {
+      expect(previewSpy.mock.calls.at(-1)?.[2]).toMatchObject({
+        mode: "light",
+        theme: { current: "light" },
+      });
+    });
+  });
+
+  it("renders a labeled keyboard outline, enriches P/D targets, and marks the active location", async () => {
+    previewSpy.mockImplementation(async (root: HTMLElement) => {
+      root.innerHTML = [
+        '<h2 id="Phase">Phase</h2>',
+        "<ul><li><strong>P-001</strong> First item</li>",
+        "<li><strong>P-006</strong> Outline item</li></ul>",
+        '<h3 id="D-002---Keep-it-shared">D-002 — Keep it shared</h3>',
+      ].join("");
+    });
+    outlineSpy.mockImplementation(
+      (_preview: HTMLElement, outline: HTMLElement) => {
+        outline.innerHTML = [
+          "<ul>",
+          '<li><span data-target-id="Phase"><span>Phase</span></span></li>',
+          '<li><span data-target-id="Decisions"><span>Decisions</span></span>',
+          '<ul><li><span data-target-id="D-002---Keep-it-shared"><span>D-002 — Keep it shared</span></span></li></ul>',
+          "</li>",
+          "</ul>",
+        ].join("");
+      },
+    );
+
+    render(
+      <PlanDocumentView
+        value="# Plan"
+        items={[
+          { id: "P-001", text: "First item" },
+          { id: "P-006", text: "Outline item" },
+        ]}
+        outline="left"
+        showJump={false}
+        showFrontmatter={false}
+      />,
+    );
+
+    const navigation = await screen.findByRole("navigation", {
+      name: "Plan outline",
+    });
+    await waitFor(() =>
+      expect(navigation.querySelectorAll("[data-target-id]").length).toBe(5),
+    );
+    const phase = navigation.querySelector<HTMLElement>(
+      '[data-target-id="Phase"]',
+    )!;
+    const item = navigation.querySelector<HTMLElement>(
+      '[data-target-id="P-006"]',
+    )!;
+    const decision = navigation.querySelector<HTMLElement>(
+      '[data-target-id="D-002---Keep-it-shared"]',
+    )!;
+    expect(phase.dataset.planOutlineKind).toBe("section");
+    expect(item.dataset.planOutlineKind).toBe("item");
+    expect(decision.dataset.planOutlineKind).toBe("decision");
+    expect(item.tabIndex).toBe(0);
+
+    const itemDestination = document.querySelector<HTMLElement>(
+      '[data-plan-item="P-006"]',
+    )!;
+    itemDestination.scrollIntoView = vi.fn();
+    fireEvent.keyDown(item, { key: "Enter" });
+    expect(itemDestination.scrollIntoView).toHaveBeenCalledWith({
+      block: "start",
+      behavior: "smooth",
+    });
+    expect(item.getAttribute("aria-current")).toBe("location");
+
+    const decisionDestination = document.querySelector<HTMLElement>(
+      "#D-002---Keep-it-shared",
+    )!;
+    decisionDestination.scrollIntoView = vi.fn();
+    fireEvent.click(decision.querySelector("span")!);
+    expect(decisionDestination.scrollIntoView).toHaveBeenCalledWith({
+      block: "start",
+      behavior: "smooth",
+    });
+    expect(decision.getAttribute("aria-current")).toBe("location");
+    expect(item.hasAttribute("aria-current")).toBe(false);
+
+    const styles = Array.from(document.querySelectorAll("style"))
+      .map((element) => element.textContent ?? "")
+      .join("\n");
+    expect(styles).toContain("[data-plan-outline-kind='item']");
+    expect(styles).toContain(":focus-visible");
+    expect(styles).toContain("[aria-current='location']");
+    expect(styles).toContain("@container (max-width: 680px)");
   });
 
   it('falls back to readable raw text when Vditor fails', async () => {

@@ -35,6 +35,102 @@ export interface PlanDocumentCandidate {
 
 export type PlanDocumentTheme = 'dark' | 'light';
 
+function planDocumentColorChannels(
+  value: string,
+): [number, number, number] | null {
+  const color = value.trim();
+  const hex = color.match(/^#([0-9a-f]{3}|[0-9a-f]{6})(?:[0-9a-f]{2})?$/i)?.[1];
+  if (hex) {
+    const full =
+      hex.length === 3
+        ? hex
+            .split("")
+            .map((part) => `${part}${part}`)
+            .join("")
+        : hex;
+    return [
+      Number.parseInt(full.slice(0, 2), 16),
+      Number.parseInt(full.slice(2, 4), 16),
+      Number.parseInt(full.slice(4, 6), 16),
+    ];
+  }
+  const rgb = color.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null;
+}
+
+/** Resolve Vditor's binary content theme from any host's live semantic theme.
+ * Portal hosts use light/dark, operator hosts use named themes, and system mode
+ * may use neither; the computed --bg channel is the common source of truth. */
+export function resolvePlanDocumentTheme(
+  root: HTMLElement | null = typeof document === "undefined"
+    ? null
+    : document.documentElement,
+): PlanDocumentTheme {
+  if (!root || typeof window === "undefined") return "dark";
+  const named = root.dataset.theme;
+  if (named === "light" || named === "portal-light") return "light";
+  if (named === "dark" || named === "portal-dark") return "dark";
+  const styles = window.getComputedStyle(root);
+  const channels = planDocumentColorChannels(styles.getPropertyValue("--bg"));
+  if (channels) {
+    const [red, green, blue] = channels;
+    return (red * 299 + green * 587 + blue * 114) / 1000 >= 160
+      ? "light"
+      : "dark";
+  }
+  const colorScheme = styles.colorScheme;
+  if (colorScheme.includes("light") && !colorScheme.includes("dark"))
+    return "light";
+  return typeof window.matchMedia === "function" &&
+    !window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "light"
+    : "dark";
+}
+
+function usePlanDocumentTheme(
+  explicitTheme?: PlanDocumentTheme,
+): PlanDocumentTheme {
+  const [theme, setTheme] = useState<PlanDocumentTheme>(
+    () => explicitTheme ?? resolvePlanDocumentTheme(),
+  );
+
+  useEffect(() => {
+    if (explicitTheme) {
+      setTheme(explicitTheme);
+      return;
+    }
+    if (typeof window === "undefined" || typeof document === "undefined")
+      return;
+    const sync = () => setTheme(resolvePlanDocumentTheme());
+    window.addEventListener("papercusp:theme-changed", sync);
+    window.addEventListener("storage", sync);
+    const observer =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(sync);
+    observer?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme", "style"],
+    });
+    const media =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : null;
+    media?.addEventListener?.("change", sync);
+    media?.addListener?.(sync);
+    sync();
+    return () => {
+      window.removeEventListener("papercusp:theme-changed", sync);
+      window.removeEventListener("storage", sync);
+      observer?.disconnect();
+      media?.removeEventListener?.("change", sync);
+      media?.removeListener?.(sync);
+    };
+  }, [explicitTheme]);
+
+  return explicitTheme ?? theme;
+}
+
 export interface PlanDocumentViewProps {
   /** Complete plan markdown. Leading frontmatter is stripped when metadata is supplied. */
   value: string;
@@ -449,11 +545,11 @@ export function PlanDocumentView({
   frontmatter,
   items,
   decisions,
-  outline = 'left',
+  outline = "left",
   showJump = true,
   showFrontmatter = true,
-  assetBaseUrl = '/vditor',
-  theme = 'dark',
+  assetBaseUrl = "/vditor",
+  theme,
   className,
   style,
   onParsed,
@@ -464,6 +560,7 @@ export function PlanDocumentView({
   const onParsedRef = useRef(onParsed);
   onParsedRef.current = onParsed;
   const [loadError, setLoadError] = useState(false);
+  const resolvedTheme = usePlanDocumentTheme(theme);
   const body = frontmatter ? stripPlanFrontmatter(value) : value;
 
   useEffect(() => {
@@ -475,17 +572,21 @@ export function PlanDocumentView({
 
     (async () => {
       await loadVditorCss();
-      const Vditor = (await import('vditor')).default;
+      const Vditor = (await import("vditor")).default;
       if (cancelled || !previewRef.current) return;
-      await Vditor.preview(previewRef.current, expandPlanDocumentWikiLinks(body), {
-        cdn: assetBaseUrl,
-        transform: neutralizePlanDocumentPlantuml,
-        mode: theme,
-        theme: { current: theme },
-        math: { engine: 'KaTeX' },
-        anchor: 1,
-        lang: 'en_US',
-      } as never);
+      await Vditor.preview(
+        previewRef.current,
+        expandPlanDocumentWikiLinks(body),
+        {
+          cdn: assetBaseUrl,
+          transform: neutralizePlanDocumentPlantuml,
+          mode: resolvedTheme,
+          theme: { current: resolvedTheme },
+          math: { engine: "KaTeX" },
+          anchor: 1,
+          lang: "en_US",
+        } as never,
+      );
       if (cancelled || !previewRef.current) return;
 
       decoratePlanDocumentDom(previewRef.current, items);
@@ -497,28 +598,136 @@ export function PlanDocumentView({
       }
 
       if (outline && outlineRef.current) {
-        outlineRef.current.innerHTML = '';
-        Vditor.outlineRender(previewRef.current, outlineRef.current);
-        const handleOutlineClick = (event: Event) => {
-          let target = event.target as HTMLElement | null;
-          while (target && target !== outlineRef.current) {
-            const targetId = target.getAttribute?.('data-target-id');
-            if (targetId) {
-              const heading = Array.from(
-                previewRef.current?.querySelectorAll<HTMLElement>('[id]') ?? [],
-              ).find((element) => element.id === targetId);
-              if (heading) {
-                event.preventDefault();
-                event.stopPropagation();
-                heading.scrollIntoView({ block: 'start', behavior: 'smooth' });
-              }
-              return;
+        const outlineRoot = outlineRef.current;
+        const previewRoot = previewRef.current;
+        outlineRoot.innerHTML = "";
+        Vditor.outlineRender(previewRoot, outlineRoot);
+
+        const topLevelList =
+          outlineRoot.querySelector<HTMLUListElement>(":scope > ul") ??
+          outlineRoot.appendChild(document.createElement("ul"));
+        const representedItems = new Set<string>();
+        for (const target of Array.from(
+          outlineRoot.querySelectorAll<HTMLElement>("[data-target-id]"),
+        )) {
+          const identity = `${target.dataset.targetId ?? ""} ${target.textContent ?? ""}`;
+          const itemId = identity.match(/\b(P-\d{3,})\b/i)?.[1]?.toUpperCase();
+          if (itemId) representedItems.add(itemId);
+        }
+
+        const missingItems = (items ?? []).filter(
+          (item) => PLAN_ID_RE.test(item.id) && !representedItems.has(item.id),
+        );
+        if (missingItems.length > 0) {
+          const group = document.createElement("li");
+          group.className = "pc-md-outline__group";
+          const label = document.createElement("div");
+          label.className = "pc-md-outline__group-label";
+          label.textContent = "Plan items";
+          group.appendChild(label);
+          const list = document.createElement("ul");
+          for (const item of missingItems) {
+            const row = document.createElement("li");
+            const anchor = document.createElement("a");
+            anchor.href = `#${item.id}`;
+            anchor.dataset.targetId = item.id;
+            anchor.dataset.planOutlineKind = "item";
+            const id = document.createElement("span");
+            id.className = "pc-md-outline__item-id";
+            id.textContent = item.id;
+            anchor.appendChild(id);
+            if (item.text?.trim()) {
+              const summary = document.createElement("span");
+              summary.className = "pc-md-outline__item-summary";
+              summary.textContent = item.text.trim();
+              anchor.appendChild(summary);
             }
-            target = target.parentElement;
+            row.appendChild(anchor);
+            list.appendChild(row);
+          }
+          group.appendChild(list);
+          const decisionsSection = Array.from(topLevelList.children).find(
+            (child) =>
+              child
+                .querySelector<HTMLElement>(":scope > [data-target-id]")
+                ?.dataset.targetId?.toLowerCase() === "decisions",
+          );
+          topLevelList.insertBefore(group, decisionsSection ?? null);
+        }
+
+        const targets = Array.from(
+          outlineRoot.querySelectorAll<HTMLElement>("[data-target-id]"),
+        );
+        for (const target of targets) {
+          const identity = `${target.dataset.targetId ?? ""} ${target.textContent ?? ""}`;
+          target.dataset.planOutlineKind = /\bP-\d{3,}\b/i.test(identity)
+            ? "item"
+            : /\bD-\d{3,}\b/i.test(identity)
+              ? "decision"
+              : "section";
+          if (target.tagName !== "A" && target.tagName !== "BUTTON") {
+            target.setAttribute("role", "link");
+          }
+          target.tabIndex = 0;
+        }
+
+        const markCurrent = (active: HTMLElement) => {
+          for (const target of targets) {
+            if (target === active)
+              target.setAttribute("aria-current", "location");
+            else target.removeAttribute("aria-current");
           }
         };
-        outlineRef.current.addEventListener('click', handleOutlineClick, true);
-        detachOutline = () => outlineRef.current?.removeEventListener('click', handleOutlineClick, true);
+
+        const activateOutlineTarget = (target: HTMLElement, event: Event) => {
+          const targetId = target.dataset.targetId;
+          if (!targetId) return;
+          const destination = PLAN_ID_RE.test(targetId)
+            ? targetId.startsWith("P-")
+              ? Array.from(
+                  previewRoot.querySelectorAll<HTMLElement>("[data-plan-item]"),
+                ).find((element) => element.dataset.planItem === targetId)
+              : (previewRoot.querySelector<HTMLElement>(`#${targetId}`) ??
+                findPlanDocumentHeading(previewRoot, targetId))
+            : Array.from(
+                previewRoot.querySelectorAll<HTMLElement>("[id]"),
+              ).find((element) => element.id === targetId);
+          if (!destination) return;
+          event.preventDefault();
+          event.stopPropagation();
+          markCurrent(target);
+          destination.scrollIntoView({ block: "start", behavior: "smooth" });
+        };
+
+        const handleOutlineClick = (event: Event) => {
+          const target =
+            event.target instanceof Element
+              ? event.target.closest<HTMLElement>("[data-target-id]")
+              : null;
+          if (target && outlineRoot.contains(target)) {
+            activateOutlineTarget(target, event);
+          }
+        };
+        const handleOutlineKeyDown = (event: KeyboardEvent) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          const target =
+            event.target instanceof Element
+              ? event.target.closest<HTMLElement>("[data-target-id]")
+              : null;
+          if (target && outlineRoot.contains(target)) {
+            activateOutlineTarget(target, event);
+          }
+        };
+        outlineRoot.addEventListener("click", handleOutlineClick, true);
+        outlineRoot.addEventListener("keydown", handleOutlineKeyDown, true);
+        detachOutline = () => {
+          outlineRoot.removeEventListener("click", handleOutlineClick, true);
+          outlineRoot.removeEventListener(
+            "keydown",
+            handleOutlineKeyDown,
+            true,
+          );
+        };
       }
     })().catch(() => {
       if (!cancelled) setLoadError(true);
@@ -529,56 +738,90 @@ export function PlanDocumentView({
       detachRefs();
       detachOutline();
     };
-  }, [assetBaseUrl, body, items, outline, theme]);
+  }, [assetBaseUrl, body, items, outline, resolvedTheme]);
 
   const preview = loadError ? (
-    <PlanDocumentFallback value={body} theme={theme} />
+    <PlanDocumentFallback value={body} theme={resolvedTheme} />
   ) : (
     <div
       ref={previewRef}
       className="vditor-reset pc-md-preview pc-plan-document__preview"
-      style={{ background: theme === 'dark' ? '#19232A' : undefined, color: theme === 'dark' ? '#e6e6e6' : undefined }}
+      style={{
+        background: "var(--bg-1, #19232a)",
+        color: "var(--fg, #e6e6e6)",
+      }}
     />
   );
 
+  const outlinePanel = (
+    <nav
+      aria-label="Plan outline"
+      className={`pc-md-outline-shell pc-md-outline-shell--${outline || "left"}`}
+    >
+      <div className="pc-md-outline__header">
+        <span>Plan outline</span>
+        <span className="pc-md-outline__legend" aria-hidden="true">
+          P items · D decisions
+        </span>
+      </div>
+      <div ref={outlineRef} className="pc-md-outline" />
+    </nav>
+  );
+
   return (
-    <div ref={scopeRef} className={`pc-plan-document ${className ?? ''}`.trim()} style={style}>
-      {showJump ? <PlanDocumentJump items={items} decisions={decisions} scopeRef={scopeRef} /> : null}
+    <div
+      ref={scopeRef}
+      className={`pc-plan-document ${className ?? ""}`.trim()}
+      style={style}
+    >
+      {showJump ? (
+        <PlanDocumentJump
+          items={items}
+          decisions={decisions}
+          scopeRef={scopeRef}
+        />
+      ) : null}
       {showFrontmatter && frontmatter ? (
         <PlanDocumentFrontmatter slug={slug} frontmatter={frontmatter} />
       ) : null}
       {outline ? (
-        <div className="pc-plan-document__body" style={{ display: 'flex', flex: '1 1 auto', minHeight: 0, gap: 16 }}>
-          {outline === 'left' ? <div ref={outlineRef} className="pc-md-outline" style={outlinePanelStyle} /> : null}
+        <div className="pc-plan-document__body">
+          {outline === "left" ? outlinePanel : null}
           {preview}
-          {outline === 'right' ? <div ref={outlineRef} className="pc-md-outline" style={outlinePanelStyle} /> : null}
+          {outline === "right" ? outlinePanel : null}
         </div>
-      ) : preview}
+      ) : (
+        preview
+      )}
       <style>{planDocumentCss}</style>
     </div>
   );
 }
 
-const outlinePanelStyle: CSSProperties = {
-  display: 'block',
-  width: 220,
-  flexShrink: 0,
-  position: 'sticky',
-  top: 0,
-  alignSelf: 'flex-start',
-  maxHeight: '100%',
-  overflow: 'auto',
-  padding: '8px 4px',
-};
-
 const planDocumentCss = `
   .pc-plan-document { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
-  .pc-plan-document__preview { flex: 1 1 auto; min-width: 0; min-height: 0; }
+  .pc-plan-document__body { container-type: inline-size; display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; gap: clamp(10px, 2vw, 18px); }
+  .pc-plan-document__preview { flex: 1 1 auto; min-width: 0; min-height: 0; background: var(--bg-1, #19232a) !important; color: var(--fg, #e6e6e6) !important; }
+  .pc-plan-document .pc-md-outline-shell { position: sticky; top: 0; align-self: flex-start; display: flex; flex: 0 0 clamp(190px, 22cqi, 248px); flex-direction: column; width: clamp(190px, 22cqi, 248px); max-height: min(72vh, calc(100vh - 100px)); overflow: hidden; color: var(--fg-mute, #7f9bb4); background: color-mix(in srgb, var(--bg-2, #111b2d), transparent 8%); border: 1px solid var(--border, rgba(125,211,252,.18)); border-radius: 10px; }
+  .pc-plan-document .pc-md-outline__header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 9px 10px 8px; color: var(--fg, #e7f7ff); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--border, rgba(125,211,252,.18)); }
+  .pc-plan-document .pc-md-outline__legend { color: var(--fg-dim, #9db5c8); font-size: 9px; font-weight: 600; letter-spacing: .02em; text-transform: none; white-space: nowrap; }
+  .pc-plan-document .pc-md-outline.vditor-outline { display: block; min-height: 0; overflow-y: auto; padding: 8px; }
   .pc-plan-document .pc-md-outline ul { list-style: none; padding-left: 12px; margin: 0; }
   .pc-plan-document .pc-md-outline > ul { padding-left: 0; }
+  .pc-plan-document .pc-md-outline ul ul { margin-inline-start: 7px; padding-inline-start: 8px; border-inline-start: 1px solid var(--border, rgba(125,211,252,.18)); }
   .pc-plan-document .pc-md-outline li { margin: 2px 0; }
-  .pc-plan-document .pc-md-outline a { color: #aaa; text-decoration: none; font-size: 12px; line-height: 1.5; display: block; padding: 1px 4px; border-radius: 2px; }
-  .pc-plan-document .pc-md-outline a:hover { color: #fff; background: #232E37; }
+  .pc-plan-document .pc-md-outline [data-target-id] { --pc-outline-kind: transparent; position: relative; display: flex; align-items: baseline; gap: 6px; padding: 4px 7px 4px 10px; color: var(--fg-mute, #7f9bb4); font-size: 12px; line-height: 1.4; text-decoration: none; overflow-wrap: anywhere; cursor: pointer; border: 1px solid transparent; border-radius: 6px; }
+  .pc-plan-document .pc-md-outline [data-target-id]::before { position: absolute; top: 6px; bottom: 6px; left: 3px; width: 2px; content: ''; background: var(--pc-outline-kind); border-radius: 999px; }
+  .pc-plan-document .pc-md-outline [data-plan-outline-kind='section'] { color: var(--fg-dim, #b9d4e8); font-weight: 650; }
+  .pc-plan-document .pc-md-outline [data-plan-outline-kind='item'] { --pc-outline-kind: var(--accent, #57d7ff); }
+  .pc-plan-document .pc-md-outline [data-plan-outline-kind='decision'] { --pc-outline-kind: var(--warning, var(--warn, #fb923c)); }
+  .pc-plan-document .pc-md-outline [data-target-id]:hover { color: var(--fg, #e7f7ff); background: var(--bg-3, rgba(255,255,255,.075)); }
+  .pc-plan-document .pc-md-outline [data-target-id]:focus-visible { color: var(--fg, #e7f7ff); background: color-mix(in srgb, var(--accent, #57d7ff) 11%, transparent); border-color: color-mix(in srgb, var(--accent, #57d7ff) 58%, transparent); outline: 2px solid color-mix(in srgb, var(--accent, #57d7ff) 56%, transparent); outline-offset: 1px; }
+  .pc-plan-document .pc-md-outline [data-target-id][aria-current='location'] { color: var(--fg, #e7f7ff); font-weight: 650; background: color-mix(in srgb, var(--accent, #57d7ff) 16%, transparent); border-color: color-mix(in srgb, var(--accent, #57d7ff) 36%, transparent); }
+  .pc-plan-document .pc-md-outline__group { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--border, rgba(125,211,252,.18)); }
+  .pc-plan-document .pc-md-outline__group-label { padding: 2px 7px 4px; color: var(--fg-dim, #9db5c8); font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+  .pc-plan-document .pc-md-outline__item-id { flex: 0 0 auto; color: var(--accent-strong, var(--accent, #57d7ff)); font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; font-weight: 750; }
+  .pc-plan-document .pc-md-outline__item-summary { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .pc-plan-document__fallback { flex: 1 1 auto; min-width: 0; border: 1px solid var(--border, rgba(125,211,252,.18)); border-radius: 8px; overflow: hidden; }
   .pc-plan-document__fallback p { margin: 0; padding: 8px 12px; color: var(--fg-mute, #7f9bb4); border-bottom: 1px solid var(--border, rgba(125,211,252,.18)); }
   /* Colours deliberately absent: planDocumentFallbackSurface() supplies the
@@ -590,4 +833,9 @@ const planDocumentCss = `
   .pc-plan-document .pc-md-preview :is(code.language-yaml, code.language-yml, code.language-frontmatter, pre code:first-child) { color: var(--fg, #e7f7ff) !important; }
   .pc-plan-document .pc-md-preview :is(.hljs-attr, .hljs-attribute, .hljs-keyword, .hljs-meta) { color: var(--accent-strong, #7dd3fc) !important; }
   .pc-plan-document .pc-md-preview :is(.hljs-string, .hljs-literal, .hljs-number) { color: var(--fg-dim, #b9d4e8) !important; }
+  @container (max-width: 680px) {
+    .pc-plan-document__body { flex-direction: column; }
+    .pc-plan-document .pc-md-outline-shell { position: relative; order: -1; width: 100%; max-height: none; flex-basis: auto; }
+    .pc-plan-document .pc-md-outline.vditor-outline { max-height: 190px; }
+  }
 `;
