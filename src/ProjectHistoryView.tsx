@@ -152,6 +152,7 @@ const ITEM_PAGE_SIZE = 12;
 /** Commits shown on the plan card before the "Show N more commits" expansion. */
 const PLAN_COMMIT_PREVIEW = 6;
 const HISTORY_DOCUMENT_STATE = '__papercuspProjectHistoryDocument';
+const HISTORY_WORK_ITEM_STATE = '__papercuspProjectHistoryWorkItem';
 const TERMINAL_PLAN_STATES = new Set(['archived', 'cancelled', 'canceled', 'complete', 'completed', 'done', 'shipped', 'superseded']);
 const buildDateFormatter = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
@@ -215,6 +216,27 @@ export function summarizeBuildItemEvidence(item: BuildHistoryWorkItem): Evidence
     item.completionSummary,
     ...lines.filter(({ line }) => !categorized.has(line)).map(({ line }) => line),
   ].filter((line): line is string => Boolean(line)).slice(0, 3);
+  return { changed, verification, files };
+}
+
+/**
+ * The COMPLETE evidence set for one work item. `summarizeBuildItemEvidence` slices
+ * each block to three lines so a card stays scannable; the full-record dialog is
+ * the place that must not truncate, or "read the full work item" is a lie.
+ */
+function fullBuildItemEvidence(item: BuildHistoryWorkItem): EvidenceSummary {
+  const lines = evidenceLines(item.completionEvidence);
+  const files = lines
+    .filter(({ key }) => /(artifact|file|output|path)/i.test(key))
+    .map(({ line }) => line);
+  const verification = lines
+    .filter(({ key }) => /(build|check|lint|proof|result|test|typecheck|valid|verif)/i.test(key))
+    .map(({ line }) => line);
+  const categorized = new Set([...files, ...verification]);
+  const changed = [
+    item.completionSummary,
+    ...lines.filter(({ line }) => !categorized.has(line)).map(({ line }) => line),
+  ].filter((line): line is string => Boolean(line));
   return { changed, verification, files };
 }
 
@@ -339,6 +361,9 @@ export function historyDocumentHref(plan: string, currentUrl = '/'): string {
   url.searchParams.set('tab', 'history');
   url.searchParams.set('plan', plan);
   url.searchParams.delete('item');
+  // Only one record viewer may be addressed at a time: leaving `work-item` behind
+  // would reopen BOTH dialogs on the next load of this link.
+  url.searchParams.delete('work-item');
   url.searchParams.set('document', plan);
   url.hash = historyElementId('plan', plan);
   return `${url.pathname}?${url.searchParams.toString()}${url.hash}`;
@@ -350,9 +375,37 @@ export function historyDocumentCloseHref(currentUrl = '/'): string {
   return `${url.pathname}${url.search ? url.search : ''}${url.hash}`;
 }
 
+/**
+ * Durable link to ONE work item's full record. The plan half of a build entry has
+ * had `historyDocumentHref` since the History tab shipped; this is the work-item
+ * half the owner asked for (WI-38718, 2026-08-14) — a build entry must reach the
+ * record that commissioned it without hunting through two disclosures.
+ */
+export function historyWorkItemHref(plan: string, item: string, currentUrl = '/'): string {
+  const url = new URL(currentUrl, 'https://project.local');
+  url.searchParams.set('tab', 'history');
+  url.searchParams.set('plan', plan);
+  url.searchParams.set('item', item);
+  url.searchParams.delete('document');
+  url.searchParams.set('work-item', item);
+  url.hash = historyElementId('item', item);
+  return `${url.pathname}?${url.searchParams.toString()}${url.hash}`;
+}
+
+export function historyWorkItemCloseHref(currentUrl = '/'): string {
+  const url = new URL(currentUrl, 'https://project.local');
+  url.searchParams.delete('work-item');
+  return `${url.pathname}${url.search ? url.search : ''}${url.hash}`;
+}
+
 function readHistoryDocument(): string | null {
   if (typeof window === 'undefined') return null;
   return new URL(window.location.href).searchParams.get('document')?.trim() || null;
+}
+
+function readHistoryWorkItem(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URL(window.location.href).searchParams.get('work-item')?.trim() || null;
 }
 
 function isPlainPrimaryClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
@@ -558,13 +611,26 @@ function BuildValidationContract({ plan }: { plan: BuildHistoryPlan }) {
 
 const BuildItem = memo(function BuildItem({
   item,
-  planSlug,
+  plan,
+  onOpenDocument,
+  onOpenWorkItem,
 }: {
   item: BuildHistoryWorkItem;
-  planSlug: string;
+  plan: BuildHistoryPlan;
+  onOpenDocument: (plan: BuildHistoryPlan, trigger: HTMLAnchorElement) => void;
+  onOpenWorkItem: (plan: BuildHistoryPlan, item: BuildHistoryWorkItem, trigger: HTMLAnchorElement) => void;
 }) {
+  const planSlug = plan.slug;
   const summary = summarizeBuildItemEvidence(item);
-  const href = historyHref(planSlug, item.id, typeof window === 'undefined' ? '/' : window.location.href);
+  const currentUrl = typeof window === 'undefined' ? '/' : window.location.href;
+  const href = historyHref(planSlug, item.id, currentUrl);
+  // History rows predate the work-item/plan association, so a missing ref is the
+  // NORMAL case, not an error case: render no control at all rather than a link
+  // whose href resolves to nothing (WI-38718 acceptance).
+  const itemRef = item.id?.trim() ?? '';
+  const planRef = planSlug?.trim() ?? '';
+  const workItemHref = itemRef ? historyWorkItemHref(planRef || itemRef, itemRef, currentUrl) : null;
+  const planHref = planRef ? historyDocumentHref(planRef, currentUrl) : null;
 
   return (
     <li className="build-item" id={historyElementId('item', item.id)}>
