@@ -865,11 +865,13 @@ function BuildPlanCard({
 function BuildPlanDialog({
   documentSlug,
   plan,
+  documentAssetBaseUrl,
   returnFocusRef,
   onClose,
 }: {
   documentSlug: string | null;
   plan: BuildHistoryPlan | null;
+  documentAssetBaseUrl: string;
   returnFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
@@ -943,7 +945,7 @@ function BuildPlanDialog({
                 items={plan.items}
                 decisions={plan.decisions}
                 outline="left"
-                assetBaseUrl="/vditor"
+                assetBaseUrl={documentAssetBaseUrl}
                 theme="light"
               />
             </>
@@ -1105,12 +1107,15 @@ function BuildHistoryMetrics({ plans, now }: { plans: readonly BuildHistoryPlan[
 
 export function BuildHistoryList({
   plans,
+  documentAssetBaseUrl = '/vditor',
   initialTarget = null,
   initialDocument = null,
   initialWorkItem = null,
   now = new Date(),
 }: {
   plans: readonly BuildHistoryPlan[];
+  /** Consumer-hosted Vditor distribution; relative paths support static subdirectories. */
+  documentAssetBaseUrl?: string;
   initialTarget?: BuildHistoryTarget | null;
   initialDocument?: string | null;
   initialWorkItem?: string | null;
@@ -1285,6 +1290,7 @@ export function BuildHistoryList({
     <>
       <BuildPlanDialog
         documentSlug={documentSlug}
+        documentAssetBaseUrl={documentAssetBaseUrl}
         plan={documentPlan}
         returnFocusRef={documentTriggerRef}
         onClose={closeDocument}
