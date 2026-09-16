@@ -19,7 +19,12 @@ import { describe, expect, it } from 'vitest';
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const CSS_PATH = join(here, 'ProjectHistoryView.css');
+/**
+ * Subject override for copy-out mutation probes (CLAUDE.md "Proving a guard is falsifiable"):
+ * point `PH_CSS_SUBJECT` at a deliberately-incomplete COPY of the stylesheet to record a
+ * ledger-backed counterexample run without ever mutating the tracked file. Unset ⇒ the real one.
+ */
+const CSS_PATH = process.env.PH_CSS_SUBJECT ?? join(here, 'ProjectHistoryView.css');
 const TSX_PATH = join(here, 'ProjectHistoryView.tsx');
 
 const CLASS_TOKEN = /\bbuild-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
