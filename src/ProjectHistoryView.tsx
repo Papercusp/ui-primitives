@@ -1,5 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { PlanDocumentView } from './PlanDocumentView';
+import './ProjectHistoryView.css';
 import {
   memo,
   useDeferredValue,
