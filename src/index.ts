@@ -3,6 +3,20 @@
 // Pure peer-dep React components. No internal coupling beyond npm packages.
 // Intended for cross-app reuse via git submodule.
 
+export {
+  ACTIVITY_FILTERS,
+  ActivityTimelineView,
+  activityDayLabel,
+  filterActivityEvents,
+  formatEventTime,
+  formatRelativeTime,
+  groupActivityEventsByDay,
+  type ActivityDayGroup,
+  type ActivityEventKind,
+  type ActivityFilter,
+  type ActivityTimelineEvent,
+  type ActivityTimelineViewProps,
+} from './ActivityTimelineView';
 export { JsonTree } from './JsonTree';
 export { LogView, type LogEvent, type LogTab, type LogViewProps, type AppLinkConfig } from './LogView';
 export { MarkdownView } from './MarkdownView';
