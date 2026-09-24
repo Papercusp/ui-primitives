@@ -151,8 +151,9 @@ export interface PlanDocumentViewProps {
   /** Host-specific decorators run after the shared plan decorations. */
   onParsed?: (root: HTMLElement) => void;
   /** Optional diagnostics. Content-ready includes host data retrieval + React mount;
-   * renderer-ready follows JS/CSS loading; preview-rendered precedes decoration. */
-  onRenderPhase?: (phase: 'content-ready' | 'renderer-ready' | 'preview-rendered') => void;
+   * styles-ready follows CSS loading; renderer-ready follows JS loading;
+   * preview-rendered precedes decoration. */
+  onRenderPhase?: (phase: 'content-ready' | 'styles-ready' | 'renderer-ready' | 'preview-rendered') => void;
 }
 
 const STATUS_TOKEN_RE = /^(todo|wip|blocked|needs-human|done|dropped)$/;
@@ -581,12 +582,14 @@ export function PlanDocumentView({
     let detachOutline = () => {};
     setLoadError(false);
 
-    const reportPhase = (phase: 'content-ready' | 'renderer-ready' | 'preview-rendered') => {
+    const reportPhase = (phase: 'content-ready' | 'styles-ready' | 'renderer-ready' | 'preview-rendered') => {
       try { onRenderPhaseRef.current?.(phase); } catch { /* diagnostics cannot fail rendering */ }
     };
     (async () => {
       reportPhase('content-ready');
       await loadVditorCss();
+      if (cancelled || !previewRef.current) return;
+      reportPhase('styles-ready');
       const Vditor = (await import("vditor")).default;
       if (cancelled || !previewRef.current) return;
       reportPhase('renderer-ready');

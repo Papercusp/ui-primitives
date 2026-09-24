@@ -64,11 +64,11 @@ describe('plan rendering phase diagnostics', () => {
     const parsed = vi.fn();
     render(<PlanDocumentView value="ready" outline={false} onRenderPhase={(phase) => phases.push(phase)} onParsed={parsed} />);
     await waitFor(() => expect(previewSpy).toHaveBeenCalledOnce());
-    expect(phases).toEqual(['content-ready', 'renderer-ready']);
+    expect(phases).toEqual(['content-ready', 'styles-ready', 'renderer-ready']);
     expect(parsed).not.toHaveBeenCalled();
     finish();
     await waitFor(() => expect(parsed).toHaveBeenCalledOnce());
-    expect(phases).toEqual(['content-ready', 'renderer-ready', 'preview-rendered']);
+    expect(phases).toEqual(['content-ready', 'styles-ready', 'renderer-ready', 'preview-rendered']);
     expect(parsed.mock.calls[0]![0].textContent).toBe('ready');
   });
 
@@ -81,7 +81,7 @@ describe('plan rendering phase diagnostics', () => {
     unmount();
     finish();
     await Promise.resolve();
-    expect(phases).toEqual(['content-ready', 'renderer-ready']);
+    expect(phases).toEqual(['content-ready', 'styles-ready', 'renderer-ready']);
   });
 });
 
