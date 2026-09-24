@@ -149,6 +149,9 @@ export interface PlanDocumentViewProps {
   style?: CSSProperties;
   /** Host-specific decorators run after the shared plan decorations. */
   onParsed?: (root: HTMLElement) => void;
+  /** Optional diagnostics. Content-ready includes host data retrieval + React mount;
+   * renderer-ready follows JS/CSS loading; preview-rendered precedes decoration. */
+  onRenderPhase?: (phase: 'content-ready' | 'renderer-ready' | 'preview-rendered') => void;
 }
 
 const STATUS_TOKEN_RE = /^(todo|wip|blocked|needs-human|done|dropped)$/;
@@ -553,12 +556,15 @@ export function PlanDocumentView({
   className,
   style,
   onParsed,
+  onRenderPhase,
 }: PlanDocumentViewProps) {
   const scopeRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const outlineRef = useRef<HTMLDivElement>(null);
   const onParsedRef = useRef(onParsed);
   onParsedRef.current = onParsed;
+  const onRenderPhaseRef = useRef(onRenderPhase);
+  onRenderPhaseRef.current = onRenderPhase;
   const [loadError, setLoadError] = useState(false);
   const resolvedTheme = usePlanDocumentTheme(theme);
   const body = frontmatter ? stripPlanFrontmatter(value) : value;
@@ -570,10 +576,15 @@ export function PlanDocumentView({
     let detachOutline = () => {};
     setLoadError(false);
 
+    const reportPhase = (phase: 'content-ready' | 'renderer-ready' | 'preview-rendered') => {
+      try { onRenderPhaseRef.current?.(phase); } catch { /* diagnostics cannot fail rendering */ }
+    };
     (async () => {
+      reportPhase('content-ready');
       await loadVditorCss();
       const Vditor = (await import("vditor")).default;
       if (cancelled || !previewRef.current) return;
+      reportPhase('renderer-ready');
       await Vditor.preview(
         previewRef.current,
         expandPlanDocumentWikiLinks(body),
@@ -589,6 +600,7 @@ export function PlanDocumentView({
       );
       if (cancelled || !previewRef.current) return;
 
+      reportPhase('preview-rendered');
       decoratePlanDocumentDom(previewRef.current, items);
       detachRefs = attachPlanDocumentRefClickHandler(previewRef.current);
       try {

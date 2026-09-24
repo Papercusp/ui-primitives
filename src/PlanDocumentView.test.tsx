@@ -38,6 +38,37 @@ afterEach(() => {
   document.documentElement.style.removeProperty("--bg");
 });
 
+describe('plan rendering phase diagnostics', () => {
+  it('reports preparation before pending rendering, then reports actual rendered content', async () => {
+    let finish!: () => void;
+    previewSpy.mockImplementation((root: HTMLElement) => new Promise<void>((resolve) => {
+      finish = () => { root.innerHTML = '<p>ready</p>'; resolve(); };
+    }));
+    const phases: string[] = [];
+    const parsed = vi.fn();
+    render(<PlanDocumentView value="ready" outline={false} onRenderPhase={(phase) => phases.push(phase)} onParsed={parsed} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalledOnce());
+    expect(phases).toEqual(['content-ready', 'renderer-ready']);
+    expect(parsed).not.toHaveBeenCalled();
+    finish();
+    await waitFor(() => expect(parsed).toHaveBeenCalledOnce());
+    expect(phases).toEqual(['content-ready', 'renderer-ready', 'preview-rendered']);
+    expect(parsed.mock.calls[0]![0].textContent).toBe('ready');
+  });
+
+  it('does not report a pending render as complete after unmount', async () => {
+    let finish!: () => void;
+    previewSpy.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const phases: string[] = [];
+    const { unmount } = render(<PlanDocumentView value="pending" outline={false} onRenderPhase={(phase) => phases.push(phase)} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalledOnce());
+    unmount();
+    finish();
+    await Promise.resolve();
+    expect(phases).toEqual(['content-ready', 'renderer-ready']);
+  });
+});
+
 describe('shared plan document transforms', () => {
   it('strips only a leading frontmatter block', () => {
     expect(stripPlanFrontmatter('---\ntitle: Demo\n---\n# Body')).toBe('# Body');
