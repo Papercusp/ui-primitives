@@ -88,21 +88,39 @@ export function resolvePlanDocumentTheme(
     : "dark";
 }
 
+// Reading attributes/media does not force style resolution across the newly
+// mounted plan. Keep the render-to-subscription race covered without repeating
+// getComputedStyle during every unchanged mount commit.
+function planThemeInputs(): string | null {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null;
+  return JSON.stringify([
+    document.documentElement.getAttribute('data-theme'),
+    document.documentElement.getAttribute('style'),
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? null,
+  ]);
+}
+
 function usePlanDocumentTheme(
   explicitTheme?: PlanDocumentTheme,
 ): PlanDocumentTheme {
-  const [theme, setTheme] = useState<PlanDocumentTheme>(
-    () => explicitTheme ?? resolvePlanDocumentTheme(),
-  );
+  const observedInputs = useRef<string | null>(null);
+  const [theme, setTheme] = useState<PlanDocumentTheme>(() => {
+    observedInputs.current = planThemeInputs();
+    return explicitTheme ?? resolvePlanDocumentTheme();
+  });
 
   useEffect(() => {
     if (explicitTheme) {
+      observedInputs.current = null;
       setTheme(explicitTheme);
       return;
     }
     if (typeof window === "undefined" || typeof document === "undefined")
       return;
-    const sync = () => setTheme(resolvePlanDocumentTheme());
+    const sync = () => {
+      observedInputs.current = planThemeInputs();
+      setTheme(resolvePlanDocumentTheme());
+    };
     window.addEventListener("papercusp:theme-changed", sync);
     window.addEventListener("storage", sync);
     const observer =
@@ -119,7 +137,7 @@ function usePlanDocumentTheme(
         : null;
     media?.addEventListener?.("change", sync);
     media?.addListener?.(sync);
-    sync();
+    if (observedInputs.current !== planThemeInputs()) sync();
     return () => {
       window.removeEventListener("papercusp:theme-changed", sync);
       window.removeEventListener("storage", sync);

@@ -39,6 +39,32 @@ afterEach(() => {
 });
 
 describe('plan rendering phase diagnostics', () => {
+  it('does not re-read computed theme styles during an unchanged mount commit', async () => {
+    document.documentElement.dataset.theme = 'custom:test';
+    document.documentElement.style.setProperty('--bg', '#191817');
+    const original = window.getComputedStyle.bind(window);
+    let rootReads = 0;
+    const read = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+      if (element === document.documentElement) rootReads++;
+      return original(element, pseudo);
+    });
+    try {
+      render(<PlanDocumentView value="# Theme" outline={false} showJump={false} />);
+      await waitFor(() => expect(previewSpy).toHaveBeenCalled());
+      expect(rootReads).toBe(1);
+    } finally { read.mockRestore(); }
+  });
+
+  it('reconciles a theme changed between render and the subscription effect', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    function Host() {
+      useLayoutEffect(() => { document.documentElement.dataset.theme = 'light'; }, []);
+      return <PlanDocumentView value="# Theme" outline={false} showJump={false} />;
+    }
+    render(<Host />);
+    await waitFor(() => expect(previewSpy.mock.calls.at(-1)?.[2]).toMatchObject({ mode: 'light' }));
+  });
+
   it('starts preparing the document before the host finishes its initial visual commit', async () => {
     previewSpy.mockResolvedValue(undefined);
     const parsed = vi.fn();
