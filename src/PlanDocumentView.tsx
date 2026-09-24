@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -569,7 +570,11 @@ export function PlanDocumentView({
   const resolvedTheme = usePlanDocumentTheme(theme);
   const body = frontmatter ? stripPlanFrontmatter(value) : value;
 
-  useEffect(() => {
+  // Begin visual preparation in the document's commit, before the browser
+  // paints an empty preview. A passive effect waits until after that paint
+  // (and any other queued work). Asset loading remains asynchronous; completion
+  // and cancellation still follow the actual Vditor render below.
+  useLayoutEffect(() => {
     if (!previewRef.current) return;
     let cancelled = false;
     let detachRefs = () => {};

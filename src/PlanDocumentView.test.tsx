@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createRef } from 'react';
+import { createRef, useLayoutEffect } from 'react';
 
 const { previewSpy, outlineSpy } = vi.hoisted(() => ({
   previewSpy: vi.fn(),
@@ -39,6 +39,22 @@ afterEach(() => {
 });
 
 describe('plan rendering phase diagnostics', () => {
+  it('starts preparing the document before the host finishes its initial visual commit', async () => {
+    previewSpy.mockResolvedValue(undefined);
+    const parsed = vi.fn();
+    let preparationStarted = false;
+    const atHostCommit: boolean[] = [];
+    function Host() {
+      useLayoutEffect(() => { atHostCommit.push(preparationStarted); }, []);
+      return <PlanDocumentView value="ready" outline={false} onParsed={parsed} onRenderPhase={(phase) => {
+        if (phase === 'content-ready') preparationStarted = true;
+      }} />;
+    }
+    render(<Host />);
+    await waitFor(() => expect(parsed).toHaveBeenCalledOnce());
+    expect(atHostCommit).toEqual([true]);
+  });
+
   it('reports preparation before pending rendering, then reports actual rendered content', async () => {
     let finish!: () => void;
     previewSpy.mockImplementation((root: HTMLElement) => new Promise<void>((resolve) => {
