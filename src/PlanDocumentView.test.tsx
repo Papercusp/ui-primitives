@@ -4,15 +4,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createRef, useLayoutEffect } from 'react';
 
-const { previewSpy, outlineSpy } = vi.hoisted(() => ({
+const { previewSpy, outlineSpy, md2htmlSpy } = vi.hoisted(() => ({
   previewSpy: vi.fn(),
   outlineSpy: vi.fn(),
+  md2htmlSpy: vi.fn(),
 }));
 
 vi.mock('vditor', () => ({
   default: {
     preview: previewSpy,
     outlineRender: outlineSpy,
+    md2html: md2htmlSpy,
   },
 }));
 
@@ -26,16 +28,105 @@ import {
   rankPlanDocumentCandidates,
   resolvePlanDocumentTheme,
   stripPlanFrontmatter,
+  preparePlanDocument,
 } from "./PlanDocumentView";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   document.body.innerHTML = '';
   previewSpy.mockReset();
   outlineSpy.mockReset();
+  md2htmlSpy.mockReset();
+  await preparePlanDocument('x'.repeat(512 * 1024 + 1));
   vi.useRealTimers();
   delete document.documentElement.dataset.theme;
   document.documentElement.style.removeProperty("--bg");
+});
+
+describe('prepared plan documents', () => {
+  it('deduplicates exact compilation and preserves live preview options, transforms and decorations', async () => {
+    let finish!: (html: string) => void;
+    md2htmlSpy.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+    const body = '# Prepared\n\n[[pot/page|Page]]\n\nP-001';
+    const first = preparePlanDocument(body);
+    expect(preparePlanDocument(body)).toBe(first);
+    await waitFor(() => expect(md2htmlSpy).toHaveBeenCalledOnce());
+    expect(md2htmlSpy.mock.calls[0]![0]).toContain('[Page](/wiki?target=page&harness=pot)');
+    expect(md2htmlSpy.mock.calls[0]![1]).toMatchObject({ cdn: '/vditor', anchor: 1, lang: 'en_US', math: { engine: 'KaTeX' } });
+    finish('<h1 id="prepared">Prepared</h1><ul><li><strong>P-001</strong> <code>todo</code></li></ul><pre><code class="language-plantuml">safe</code></pre>');
+    expect(await first).toBe(true);
+    const parsed = vi.fn();
+    previewSpy.mockImplementation(async (root: HTMLElement, _markdown: string, options: { transform: (html: string) => string }) => {
+      root.innerHTML = options.transform('<p>empty compiler output</p>');
+    });
+    render(<PlanDocumentView value={body} theme="light" outline={false} showJump={false}
+      items={[{ id: 'P-001', storedStatus: 'todo', effectiveStatus: 'blocked' }]} onParsed={parsed} />);
+    await waitFor(() => expect(parsed).toHaveBeenCalledOnce());
+    expect(md2htmlSpy).toHaveBeenCalledOnce();
+    expect(previewSpy.mock.calls[0]![1]).toBe('');
+    expect(previewSpy.mock.calls[0]![2]).toMatchObject({ mode: 'light', theme: { current: 'light' }, anchor: 1, math: { engine: 'KaTeX' } });
+    const root = parsed.mock.calls[0]![0] as HTMLElement;
+    expect(root.querySelector('#prepared')).not.toBeNull();
+    expect(root.querySelector('.pc-plan-badge')?.textContent).toBe('blocked');
+    expect(root.querySelector('code.language-plantuml-neutralized')).not.toBeNull();
+  });
+
+  it('renders changed content and different asset mirrors through the ordinary path', async () => {
+    md2htmlSpy.mockResolvedValue('<p>old</p>');
+    await preparePlanDocument('old', '/mirror');
+    const mounted = render(<PlanDocumentView value="new" assetBaseUrl="/mirror" outline={false} />);
+    await waitFor(() => expect(previewSpy.mock.calls[0]![1]).toBe('new'));
+    mounted.unmount();
+    render(<PlanDocumentView value="old" assetBaseUrl="/other" outline={false} />);
+    await waitFor(() => expect(previewSpy.mock.calls[1]![1]).toBe('old'));
+  });
+
+  it('does not delay a click behind unfinished preparation', async () => {
+    let finish!: (html: string) => void;
+    md2htmlSpy.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+    const preparation = preparePlanDocument('pending preparation');
+    await waitFor(() => expect(md2htmlSpy).toHaveBeenCalledOnce());
+    render(<PlanDocumentView value="pending preparation" outline={false} />);
+    await waitFor(() => expect(previewSpy.mock.calls[0]![1]).toBe('pending preparation'));
+    finish('<p>pending preparation</p>');
+    expect(await preparation).toBe(true);
+  });
+
+  it('keeps the newest body when an older compilation finishes last', async () => {
+    const finish: Array<(html: string) => void> = [];
+    md2htmlSpy.mockImplementation(() => new Promise<string>((resolve) => { finish.push(resolve); }));
+    const old = preparePlanDocument('older');
+    await waitFor(() => expect(finish).toHaveLength(1));
+    const current = preparePlanDocument('newest');
+    await waitFor(() => expect(finish).toHaveLength(2));
+    finish[1]!('<p>newest</p>');
+    expect(await current).toBe(true);
+    finish[0]!('<p>older</p>');
+    expect(await old).toBe(false);
+    render(<PlanDocumentView value="newest" outline={false} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalledOnce());
+    expect(previewSpy.mock.calls[0]![1]).toBe('');
+    expect(previewSpy.mock.calls[0]![2].transform('')).toBe('<p>newest</p>');
+  });
+
+  it('retries failed preparation and accepts an empty compiled document', async () => {
+    md2htmlSpy.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce('');
+    expect(await preparePlanDocument('retry')).toBe(false);
+    expect(await preparePlanDocument('retry')).toBe(true);
+    expect(md2htmlSpy).toHaveBeenCalledTimes(2);
+    render(<PlanDocumentView value="retry" outline={false} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalledOnce());
+    expect(previewSpy.mock.calls[0]![2].transform('fallback')).toBe('');
+  });
+
+  it('bounds retained source and compiled output', async () => {
+    expect(await preparePlanDocument('x'.repeat(512 * 1024 + 1))).toBe(false);
+    expect(md2htmlSpy).not.toHaveBeenCalled();
+    md2htmlSpy.mockResolvedValue('x'.repeat(2 * 1024 * 1024 + 1));
+    expect(await preparePlanDocument('large output')).toBe(false);
+    render(<PlanDocumentView value="large output" outline={false} />);
+    await waitFor(() => expect(previewSpy.mock.calls[0]![1]).toBe('large output'));
+  });
 });
 
 describe('plan rendering phase diagnostics', () => {
