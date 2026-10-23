@@ -11,6 +11,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./markdown": {
+      "types": "./src/MarkdownView.tsx",
+      "import": "./src/MarkdownView.tsx",
+      "default": "./src/MarkdownView.tsx"
+    },
     "./controls": {
       "types": "./src/controls/index.ts",
       "import": "./src/controls/index.ts",
